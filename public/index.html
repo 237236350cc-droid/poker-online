@@ -60,7 +60,7 @@
         .player-hand .card { width: 55px; height: 78px; }
         .actions { display: flex; gap: 10px; justify-content: center; margin-top: 15px; flex-wrap: wrap; }
         .actions button { padding: 8px 16px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; background: #f4c542; }
-        .status { background: #000000aa; border-radius: 40px; padding: 12px; text-align: center; color: #ffefb5; margin-top: 20px; }
+        .status { background: #000000aa; border-radius: 40px; padding: 12px; text-align: center; color: #ffefb5; margin-top: 20px; white-space: pre-line; }
         .room-header {
             background: #00000099;
             border-radius: 30px;
@@ -137,15 +137,21 @@
     }
     
     function updateUI(state) {
+        console.log('收到游戏状态:', state);
         currentGameState = state;
-        if (state.myId) myId = state.myId;
+        
+        // 更新自己的ID
+        if (state.myId) {
+            myId = state.myId;
+            console.log('我的ID:', myId);
+        }
         
         document.getElementById('potDisplay').innerHTML = `💰 底池: ${state.pot}`;
         
         // 公共牌
         const communityDiv = document.getElementById('communityCards');
         communityDiv.innerHTML = '';
-        if (state.communityCards) {
+        if (state.communityCards && state.communityCards.length > 0) {
             for (let card of state.communityCards) {
                 let div = document.createElement('div'); div.className = 'card';
                 div.innerHTML = `<div class="card-rank">${card.rank}</div><div class="card-suit">${card.suit}</div>`;
@@ -169,6 +175,7 @@
                 if (p.folded) {
                     handHtml = `<div class="card back"></div><div class="card back"></div>`;
                 } else if (isMe && p.hand && p.hand.length === 2) {
+                    // 显示自己的真牌
                     handHtml = p.hand.map(c => `
                         <div class="card">
                             <div class="card-rank">${c.rank}</div>
@@ -207,7 +214,6 @@
             startBtn.style.display = 'none';
             if (isHost) resetBtn.style.display = 'inline-block';
             else resetBtn.style.display = 'none';
-            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束 ${isHost ? '，点击"重置牌局"' : ''}`;
         } else if (!state.gameStarted) {
             waitingDiv.style.display = state.players.length >= 2 ? 'none' : 'block';
             if (isHost && state.players.length >= 2) {
