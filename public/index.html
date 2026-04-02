@@ -119,6 +119,7 @@
         <div class="status" id="gameStatus">等待游戏开始...</div>
         <div class="actions" id="actionButtons" style="display:none;">
             <button id="foldBtn">🙅 弃牌</button>
+            <button id="checkBtn">✅ 过牌</button>
             <button id="callBtn">🎲 跟注</button>
             <button id="raiseBtn20">📈 +20</button>
             <button id="raiseBtn100">📈 +100</button>
@@ -140,7 +141,6 @@
         console.log('收到游戏状态:', state);
         currentGameState = state;
         
-        // 更新自己的ID
         if (state.myId) {
             myId = state.myId;
             console.log('我的ID:', myId);
@@ -148,7 +148,6 @@
         
         document.getElementById('potDisplay').innerHTML = `💰 底池: ${state.pot}`;
         
-        // 公共牌
         const communityDiv = document.getElementById('communityCards');
         communityDiv.innerHTML = '';
         if (state.communityCards && state.communityCards.length > 0) {
@@ -159,7 +158,6 @@
             }
         }
         
-        // 玩家列表
         const playersDiv = document.getElementById('playersList');
         playersDiv.innerHTML = '';
         if (state.players) {
@@ -169,13 +167,11 @@
                 const div = document.createElement('div');
                 div.className = `player-item ${isActive ? 'active' : ''}`;
                 
-                // 关键：只有自己的手牌才显示真牌
                 const isMe = (p.id === myId);
                 let handHtml = '';
                 if (p.folded) {
                     handHtml = `<div class="card back"></div><div class="card back"></div>`;
                 } else if (isMe && p.hand && p.hand.length === 2) {
-                    // 显示自己的真牌
                     handHtml = p.hand.map(c => `
                         <div class="card">
                             <div class="card-rank">${c.rank}</div>
@@ -200,10 +196,29 @@
             document.getElementById('onlineCount').innerHTML = `👥 ${state.players.length}人`;
         }
         
-        // 控制按钮显示
+        // 动态更新按钮显示状态
         const actionDiv = document.getElementById('actionButtons');
         const isMyTurn = (state.gameStarted && state.currentPlayerIndex !== undefined && state.players && state.players[state.currentPlayerIndex] && state.players[state.currentPlayerIndex].id === myId && !state.gameEnded);
         actionDiv.style.display = isMyTurn ? 'flex' : 'none';
+        
+        // 根据是否有下注来决定过牌/跟注按钮的显示
+        if (isMyTurn && state.players) {
+            const need = state.lastBet - (state.players[state.currentPlayerIndex]?.currentBet || 0);
+            const checkBtn = document.getElementById('checkBtn');
+            const callBtn = document.getElementById('callBtn');
+            
+            if (need === 0) {
+                // 没有人下注，显示过牌按钮，隐藏跟注按钮
+                checkBtn.style.display = 'inline-block';
+                callBtn.style.display = 'none';
+                callBtn.innerHTML = `🎲 跟注`;
+            } else {
+                // 有人下注，隐藏过牌按钮，显示跟注按钮
+                checkBtn.style.display = 'none';
+                callBtn.style.display = 'inline-block';
+                callBtn.innerHTML = `🎲 跟注 ${need}`;
+            }
+        }
         
         const waitingDiv = document.getElementById('waitingArea');
         const startBtn = document.getElementById('manualStartBtn');
@@ -226,14 +241,12 @@
             document.getElementById('gameStatus').innerHTML = `⏳ 等待玩家 (${state.players.length}/6人)${isHost ? '，你是房主' : ''}`;
         } else if (isMyTurn) {
             let need = state.lastBet - (state.players[state.currentPlayerIndex]?.currentBet || 0);
-            document.getElementById('callBtn').innerHTML = `🎲 跟注 ${need}`;
-            document.getElementById('gameStatus').innerHTML = `🎲 轮到你了！ 跟注: ${need} | 底池: ${state.pot}`;
+            document.getElementById('gameStatus').innerHTML = `🎲 轮到你了！ ${need > 0 ? `需跟注: ${need}` : '可以过牌'} | 底池: ${state.pot}`;
         } else {
             document.getElementById('gameStatus').innerHTML = `⏳ 等待 ${state.players?.[state.currentPlayerIndex]?.name} 行动...`;
         }
     }
     
-    // 创建房间
     document.getElementById('createRoomBtn').onclick = () => {
         const playerName = document.getElementById('playerName').value || '玩家';
         const startingChips = parseInt(document.getElementById('startingChips').value) || 2000;
@@ -250,7 +263,6 @@
         socket.on('error', (msg) => alert(msg));
     };
     
-    // 加入房间
     document.getElementById('joinRoomBtn').onclick = () => {
         const roomIdInput = document.getElementById('joinRoomId').value;
         const playerName = document.getElementById('playerName').value || '玩家';
@@ -272,6 +284,7 @@
     
     function sendAction(action, amount) { socket && roomId && socket.emit('playerAction', { roomId, action, amount }); }
     document.getElementById('foldBtn')?.addEventListener('click', () => sendAction('fold'));
+    document.getElementById('checkBtn')?.addEventListener('click', () => sendAction('check'));
     document.getElementById('callBtn')?.addEventListener('click', () => sendAction('call'));
     document.getElementById('raiseBtn20')?.addEventListener('click', () => sendAction('raise', 20));
     document.getElementById('raiseBtn100')?.addEventListener('click', () => sendAction('raise', 100));
