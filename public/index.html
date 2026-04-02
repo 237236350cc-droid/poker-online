@@ -9,11 +9,11 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background: linear-gradient(145deg, #1a472a 0%, #0a2a12 100%);
-            font-family: system-ui, sans-serif;
+            font-family: system-ui, 'Segoe UI', sans-serif;
             min-height: 100vh;
             padding: 16px;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
+        .container { max-width: 1300px; margin: 0 auto; }
         .room-panel {
             background: rgba(0,0,0,0.7);
             border-radius: 40px;
@@ -33,25 +33,23 @@
         .game-area { display: none; }
         .table {
             background: radial-gradient(circle at 30% 25%, #2b7a3e, #083017);
-            border-radius: 60px;
+            border-radius: 70px;
             padding: 20px;
             margin-bottom: 20px;
+            box-shadow: inset 0 0 0 4px #e9c891;
         }
         .community { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; min-height: 120px; }
         .card {
             width: 70px; height: 96px; background: white; border-radius: 12px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            font-weight: bold; background: #fffef7;
-            box-shadow: -2px 2px 6px rgba(0,0,0,0.2);
+            background: #fffef7; box-shadow: -2px 2px 6px rgba(0,0,0,0.2);
         }
         .card[data-suit="♥"], .card[data-suit="♦"] { color: #c33; }
         .card-rank { font-size: 34px; font-weight: bold; }
         .card-suit { font-size: 30px; }
-        .card.back {
-            background: repeating-linear-gradient(45deg, #2c5a7a, #2c5a7a 12px, #1d4468 12px, #1d4468 24px);
-        }
+        .card.back { background: repeating-linear-gradient(45deg, #2c5a7a, #2c5a7a 12px, #1d4468 12px, #1d4468 24px); }
         .card.back::after { content: "?"; font-size: 32px; color: #ffdd99; display: flex; align-items: center; justify-content: center; height: 100%; }
-        .pot { text-align: center; margin: 15px; color: gold; font-weight: bold; font-size: 20px; }
+        .pot { text-align: center; margin: 15px; color: gold; font-weight: bold; font-size: 22px; }
         .players-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 20px; }
         .player-item {
             background: #1e1e2fe6; border-radius: 28px; padding: 12px; color: white;
@@ -180,8 +178,7 @@
     }
     
     function renderGame(state) {
-        console.log('收到游戏状态:', state);
-        console.log('我的ID:', myId);
+        console.log('收到游戏状态, myId:', state.myId);
         currentGameState = state;
         
         if (state.myId) {
@@ -211,10 +208,11 @@
                 const div = document.createElement('div'); 
                 div.className = `player-item ${isActive ? 'active' : ''}`;
                 
+                const isMyOwnCard = (p.id === myId);
                 let handHtml = '';
                 if (p.folded) {
                     handHtml = `<div class="card back"></div><div class="card back"></div>`;
-                } else if (p.hand && p.hand.length === 2 && p.hand[0] && p.hand[0].rank) {
+                } else if (isMyOwnCard && p.hand && p.hand.length === 2 && p.hand[0] && p.hand[0].rank) {
                     handHtml = p.hand.map(c => `
                         <div class="card" data-suit="${c.suit}">
                             <div class="card-rank">${c.rank}</div>
@@ -256,7 +254,6 @@
         }
     }
     
-    // 创建房间
     document.getElementById('createRoomBtn').onclick = () => {
         const playerName = document.getElementById('playerName').value || '玩家';
         const startingChips = parseInt(document.getElementById('startingChips').value) || 2000;
@@ -284,7 +281,6 @@
         socket.on('error', (msg) => { alert(msg); });
     };
     
-    // 加入房间
     document.getElementById('joinRoomBtn').onclick = () => {
         const roomIdInput = document.getElementById('joinRoomId').value;
         const playerName = document.getElementById('playerName').value || '玩家';
@@ -299,7 +295,6 @@
         });
         
         socket.on('joinSuccess', (data) => {
-            console.log('加入成功，起始筹码:', data.startingChips);
             roomId = data.roomId;
             myId = data.playerId;
             isHost = false;
@@ -314,18 +309,14 @@
         socket.on('error', (msg) => { alert('错误: ' + msg); });
     };
     
-    // 开始游戏
     document.getElementById('manualStartBtn').onclick = () => {
         if (socket && roomId) {
-            console.log('开始游戏');
             socket.emit('startGame', { roomId });
         }
     };
     
-    // 重置牌局
     document.getElementById('resetGameBtn').onclick = () => {
         if (socket && roomId && isHost) {
-            console.log('重置牌局');
             socket.emit('resetGame', { roomId });
         }
     };
