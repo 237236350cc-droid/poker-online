@@ -42,25 +42,26 @@
             width: 70px; height: 96px; background: white; border-radius: 12px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             font-weight: bold; background: #fffef7;
+            box-shadow: -2px 2px 6px rgba(0,0,0,0.2);
         }
         .card[data-suit="♥"], .card[data-suit="♦"] { color: #c33; }
-        .card-rank { font-size: 34px; }
+        .card-rank { font-size: 34px; font-weight: bold; }
         .card-suit { font-size: 30px; }
         .card.back {
             background: repeating-linear-gradient(45deg, #2c5a7a, #2c5a7a 12px, #1d4468 12px, #1d4468 24px);
         }
         .card.back::after { content: "?"; font-size: 32px; color: #ffdd99; display: flex; align-items: center; justify-content: center; height: 100%; }
         .pot { text-align: center; margin: 15px; color: gold; font-weight: bold; font-size: 20px; }
-        .players-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px; }
+        .players-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 20px; }
         .player-item {
             background: #1e1e2fe6; border-radius: 28px; padding: 12px; color: white;
             border: 1px solid rgba(255,215,0,0.3);
         }
-        .player-item.active { background: #2c5432e6; border: 2px solid #ffdf7e; }
-        .player-hand { display: flex; justify-content: center; gap: 8px; margin: 10px 0; }
-        .player-hand .card { width: 50px; height: 70px; }
+        .player-item.active { background: #2c5432e6; border: 2px solid #ffdf7e; box-shadow: 0 0 0 2px #ffcf4a; }
+        .player-hand { display: flex; justify-content: center; gap: 8px; margin: 10px 0; min-height: 85px; }
+        .player-hand .card { width: 55px; height: 78px; }
         .actions { display: flex; gap: 10px; justify-content: center; margin-top: 15px; flex-wrap: wrap; }
-        .actions button { padding: 8px 16px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; }
+        .actions button { padding: 8px 16px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; background: #f4c542; }
         .status { background: #000000aa; border-radius: 40px; padding: 12px; text-align: center; color: #ffefb5; margin-top: 20px; }
         .room-header {
             background: #00000099;
@@ -75,7 +76,8 @@
         }
         .room-code { font-size: 20px; font-weight: bold; color: #ffd966; }
         .online-count { background: #2ecc71; padding: 5px 15px; border-radius: 30px; color: white; font-weight: bold; }
-        .start-btn { background: #e67e22; padding: 8px 25px; font-size: 16px; }
+        .start-btn { background: #e67e22; padding: 8px 25px; font-size: 16px; color: white; }
+        .reset-btn { background: #3498db; padding: 8px 25px; font-size: 16px; color: white; }
         .waiting-list {
             background: #00000066;
             border-radius: 30px;
@@ -85,7 +87,9 @@
         }
         @media (max-width: 700px) {
             .card { width: 55px; height: 78px; }
-            .card-rank { font-size: 26px; }
+            .player-hand .card { width: 45px; height: 65px; }
+            .card-rank { font-size: 24px; }
+            .card-suit { font-size: 22px; }
         }
     </style>
 </head>
@@ -107,7 +111,10 @@
         <div class="room-header">
             <span class="room-code" id="roomCodeDisplay">房间号: ---</span>
             <span class="online-count" id="onlineCount">👥 在线: 0人</span>
-            <button id="manualStartBtn" class="start-btn" style="display:none;">▶ 开始游戏</button>
+            <div>
+                <button id="resetGameBtn" class="reset-btn" style="display:none;">🔄 重置牌局</button>
+                <button id="manualStartBtn" class="start-btn" style="display:none;">▶ 开始游戏</button>
+            </div>
         </div>
         <div class="table">
             <div class="community" id="communityCards"></div>
@@ -153,18 +160,21 @@
         
         const waitingArea = document.getElementById('waitingArea');
         const startBtn = document.getElementById('manualStartBtn');
+        const resetBtn = document.getElementById('resetGameBtn');
         
         if (currentGameState && currentGameState.gameStarted) {
             waitingArea.style.display = 'none';
             startBtn.style.display = 'none';
+            if (isHost) resetBtn.style.display = 'inline-block';
+            else resetBtn.style.display = 'none';
         } else {
-            if (count >= 2) {
-                waitingArea.style.display = 'none';
-                if (isHost) startBtn.style.display = 'inline-block';
-                else startBtn.style.display = 'none';
+            waitingArea.style.display = count >= 2 ? 'none' : 'block';
+            if (isHost && count >= 2) {
+                startBtn.style.display = 'inline-block';
+                resetBtn.style.display = 'none';
             } else {
-                waitingArea.style.display = 'block';
                 startBtn.style.display = 'none';
+                resetBtn.style.display = 'none';
             }
         }
     }
@@ -173,11 +183,15 @@
         console.log('收到游戏状态:', state);
         currentGameState = state;
         
+        // 更新房间码显示
+        if (roomId) document.getElementById('roomCodeDisplay').innerHTML = `🏠 房间号: ${roomId}`;
+        
         const communityDiv = document.getElementById('communityCards');
         communityDiv.innerHTML = '';
         if (state.communityCards && state.communityCards.length > 0) {
             for (let card of state.communityCards) {
                 let div = document.createElement('div'); div.className = 'card';
+                div.setAttribute('data-suit', card.suit);
                 div.innerHTML = `<div class="card-rank">${card.rank}</div><div class="card-suit">${card.suit}</div>`;
                 communityDiv.appendChild(div);
             }
@@ -192,14 +206,22 @@
                 const isActive = (state.gameStarted && state.currentPlayerIndex === i && !state.gameEnded);
                 const div = document.createElement('div'); 
                 div.className = `player-item ${isActive ? 'active' : ''}`;
+                
                 let handHtml = '';
                 if (p.folded) {
                     handHtml = `<div class="card back"></div><div class="card back"></div>`;
-                } else if (p.hand && p.hand.length === 2 && p.hand[0] && p.hand[0].rank) {
-                    handHtml = p.hand.map(c => `<div class="card"><div class="card-rank">${c.rank}</div><div class="card-suit">${c.suit}</div></div>`).join('');
+                } else if (p.hand && p.hand.length === 2) {
+                    // 显示手牌
+                    handHtml = p.hand.map(c => `
+                        <div class="card" data-suit="${c.suit}">
+                            <div class="card-rank">${c.rank}</div>
+                            <div class="card-suit">${c.suit}</div>
+                        </div>
+                    `).join('');
                 } else {
                     handHtml = `<div class="card back"></div><div class="card back"></div>`;
                 }
+                
                 div.innerHTML = `
                     <div style="display:flex; justify-content:space-between;">
                         <strong>${p.name} ${p.id === myId ? '(你)' : ''}</strong>
@@ -219,7 +241,7 @@
         actionDiv.style.display = isMyTurn ? 'flex' : 'none';
         
         if (state.gameEnded) {
-            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束 🏆<br>点击"开始游戏"继续新对局`;
+            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束 🏆<br>${isHost ? '你是房主，点击"重置牌局"开始新对局' : '等待房主重置牌局'}`;
         } else if (!state.gameStarted) {
             document.getElementById('gameStatus').innerHTML = `⏳ 等待玩家加入 (${state.players ? state.players.length : 0}/6 人)${isHost ? '，你是房主，点击上方"开始游戏"按钮' : '，等待房主开始游戏'}`;
         } else if (isMyTurn) {
@@ -231,6 +253,7 @@
         }
     }
     
+    // 创建房间
     document.getElementById('createRoomBtn').onclick = () => {
         const playerName = document.getElementById('playerName').value || '玩家';
         const startingChips = parseInt(document.getElementById('startingChips').value) || 2000;
@@ -258,10 +281,10 @@
         socket.on('error', (msg) => { alert(msg); });
     };
     
+    // 加入房间
     document.getElementById('joinRoomBtn').onclick = () => {
         const roomIdInput = document.getElementById('joinRoomId').value;
         const playerName = document.getElementById('playerName').value || '玩家';
-        const startingChips = parseInt(document.getElementById('startingChips').value) || 2000;
         
         if (!roomIdInput) { alert('请输入房间号'); return; }
         
@@ -269,16 +292,17 @@
         
         socket.on('connect', () => {
             console.log('WebSocket连接成功，加入房间:', roomIdInput);
-            socket.emit('joinRoom', { roomId: roomIdInput, playerName, startingChips });
+            socket.emit('joinRoom', { roomId: roomIdInput, playerName });
         });
         
         socket.on('joinSuccess', (data) => {
-            console.log('加入成功:', data);
+            console.log('加入成功，起始筹码:', data.startingChips);
             roomId = data.roomId;
             myId = data.playerId;
             isHost = false;
             document.getElementById('roomCodeDisplay').innerHTML = `🏠 房间号: ${roomId}`;
             showGame();
+            document.getElementById('gameStatus').innerHTML = `✅ 加入成功！起始筹码: ${data.startingChips}`;
         });
         
         socket.on('gameState', renderGame);
@@ -287,6 +311,7 @@
         socket.on('error', (msg) => { alert('错误: ' + msg); });
     };
     
+    // 开始游戏
     document.getElementById('manualStartBtn').onclick = () => {
         if (socket && roomId) {
             console.log('开始游戏');
@@ -294,21 +319,7 @@
         }
     };
     
-    function sendAction(action, amount) {
-        if (socket && roomId) socket.emit('playerAction', { roomId, action, amount });
-    }
-    
-    document.getElementById('foldBtn')?.addEventListener('click', () => sendAction('fold'));
-    document.getElementById('callBtn')?.addEventListener('click', () => sendAction('call'));
-    document.getElementById('raiseBtn20')?.addEventListener('click', () => sendAction('raise', 20));
-    document.getElementById('raiseBtn100')?.addEventListener('click', () => sendAction('raise', 100));
-    document.getElementById('raiseBtn500')?.addEventListener('click', () => sendAction('raise', 500));
-    document.getElementById('allinBtn')?.addEventListener('click', () => {
-        if (currentGameState && currentGameState.players) {
-            let myChips = currentGameState.players.find(p => p.id === myId)?.chips || 0;
-            sendAction('raise', myChips);
-        }
-    });
-</script>
-</body>
-</html>
+    // 重置牌局
+    document.getElementById('resetGameBtn').onclick = () => {
+        if (socket && roomId && isHost) {
+            console
