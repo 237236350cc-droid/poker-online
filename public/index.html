@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>多人德州扑克 · 在线好友桌</title>
+    <title>多人德州扑克</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background: linear-gradient(145deg, #1a472a 0%, #0a2a12 100%);
-            font-family: system-ui, 'Segoe UI', sans-serif;
+            font-family: system-ui, sans-serif;
             min-height: 100vh;
             padding: 16px;
         }
@@ -19,7 +19,6 @@
             border-radius: 40px;
             padding: 30px;
             text-align: center;
-            backdrop-filter: blur(10px);
         }
         .room-panel input, .room-panel button {
             padding: 12px 20px;
@@ -36,18 +35,19 @@
             border-radius: 70px;
             padding: 20px;
             margin-bottom: 20px;
-            box-shadow: inset 0 0 0 4px #e9c891;
         }
         .community { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; min-height: 120px; }
         .card {
             width: 70px; height: 96px; background: white; border-radius: 12px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            background: #fffef7; box-shadow: -2px 2px 6px rgba(0,0,0,0.2);
+            box-shadow: -2px 2px 6px rgba(0,0,0,0.2);
         }
         .card[data-suit="♥"], .card[data-suit="♦"] { color: #c33; }
         .card-rank { font-size: 34px; font-weight: bold; }
         .card-suit { font-size: 30px; }
-        .card.back { background: repeating-linear-gradient(45deg, #2c5a7a, #2c5a7a 12px, #1d4468 12px, #1d4468 24px); }
+        .card.back {
+            background: repeating-linear-gradient(45deg, #2c5a7a, #2c5a7a 12px, #1d4468 12px, #1d4468 24px);
+        }
         .card.back::after { content: "?"; font-size: 32px; color: #ffdd99; display: flex; align-items: center; justify-content: center; height: 100%; }
         .pot { text-align: center; margin: 15px; color: gold; font-weight: bold; font-size: 22px; }
         .players-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 20px; }
@@ -55,7 +55,7 @@
             background: #1e1e2fe6; border-radius: 28px; padding: 12px; color: white;
             border: 1px solid rgba(255,215,0,0.3);
         }
-        .player-item.active { background: #2c5432e6; border: 2px solid #ffdf7e; box-shadow: 0 0 0 2px #ffcf4a; }
+        .player-item.active { background: #2c5432e6; border: 2px solid #ffdf7e; }
         .player-hand { display: flex; justify-content: center; gap: 8px; margin: 10px 0; min-height: 85px; }
         .player-hand .card { width: 55px; height: 78px; }
         .actions { display: flex; gap: 10px; justify-content: center; margin-top: 15px; flex-wrap: wrap; }
@@ -70,24 +70,17 @@
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 10px;
         }
         .room-code { font-size: 20px; font-weight: bold; color: #ffd966; }
-        .online-count { background: #2ecc71; padding: 5px 15px; border-radius: 30px; color: white; font-weight: bold; }
-        .start-btn { background: #e67e22; padding: 8px 25px; font-size: 16px; color: white; }
-        .reset-btn { background: #3498db; padding: 8px 25px; font-size: 16px; color: white; }
-        .waiting-list {
-            background: #00000066;
-            border-radius: 30px;
-            padding: 15px;
-            margin-top: 15px;
-            text-align: center;
-        }
+        .online-count { background: #2ecc71; padding: 5px 15px; border-radius: 30px; color: white; }
+        .start-btn, .reset-btn { padding: 8px 25px; font-size: 16px; color: white; }
+        .start-btn { background: #e67e22; }
+        .reset-btn { background: #3498db; }
+        .waiting-list { background: #00000066; border-radius: 30px; padding: 15px; margin-top: 15px; text-align: center; }
         @media (max-width: 700px) {
             .card { width: 55px; height: 78px; }
             .player-hand .card { width: 45px; height: 65px; }
             .card-rank { font-size: 24px; }
-            .card-suit { font-size: 22px; }
         }
     </style>
 </head>
@@ -108,7 +101,7 @@
     <div id="gameArea" class="game-area">
         <div class="room-header">
             <span class="room-code" id="roomCodeDisplay">房间号: ---</span>
-            <span class="online-count" id="onlineCount">👥 在线: 0人</span>
+            <span class="online-count" id="onlineCount">👥 0人</span>
             <div>
                 <button id="resetGameBtn" class="reset-btn" style="display:none;">🔄 重置牌局</button>
                 <button id="manualStartBtn" class="start-btn" style="display:none;">▶ 开始游戏</button>
@@ -120,8 +113,8 @@
         </div>
         <div class="players-list" id="playersList"></div>
         <div id="waitingArea" class="waiting-list" style="display:none;">
-            ⏳ 等待更多玩家加入... (至少2人，当前 <span id="currentPlayerCount">0</span>/6)<br>
-            <small>分享房间号给朋友，他们加入后房主点击"开始游戏"</small>
+            ⏳ 等待更多玩家... (至少2人)<br>
+            <small>分享房间号给朋友</small>
         </div>
         <div class="status" id="gameStatus">等待游戏开始...</div>
         <div class="actions" id="actionButtons" style="display:none;">
@@ -136,85 +129,48 @@
 </div>
 
 <script>
-    let socket = null;
-    let roomId = null;
-    let myId = null;
-    let currentGameState = null;
-    let isHost = false;
+    let socket = null, roomId = null, myId = null, currentGameState = null, isHost = false;
     
-    const lobby = document.getElementById('lobby');
-    const gameArea = document.getElementById('gameArea');
-    const roomInfo = document.getElementById('roomInfo');
-    
-    function showGame() { 
-        lobby.style.display = 'none'; 
-        gameArea.style.display = 'block'; 
+    function showGame() {
+        document.getElementById('lobby').style.display = 'none';
+        document.getElementById('gameArea').style.display = 'block';
     }
     
-    function updateOnlineCount(players) {
-        const count = players.length;
-        document.getElementById('onlineCount').innerHTML = `👥 在线: ${count}人`;
-        document.getElementById('currentPlayerCount').innerText = count;
-        
-        const waitingArea = document.getElementById('waitingArea');
-        const startBtn = document.getElementById('manualStartBtn');
-        const resetBtn = document.getElementById('resetGameBtn');
-        
-        if (currentGameState && currentGameState.gameStarted) {
-            waitingArea.style.display = 'none';
-            startBtn.style.display = 'none';
-            if (isHost) resetBtn.style.display = 'inline-block';
-            else resetBtn.style.display = 'none';
-        } else {
-            waitingArea.style.display = count >= 2 ? 'none' : 'block';
-            if (isHost && count >= 2) {
-                startBtn.style.display = 'inline-block';
-                resetBtn.style.display = 'none';
-            } else {
-                startBtn.style.display = 'none';
-                resetBtn.style.display = 'none';
-            }
-        }
-    }
-    
-    function renderGame(state) {
-        console.log('收到游戏状态, myId:', state.myId);
+    function updateUI(state) {
         currentGameState = state;
+        if (state.myId) myId = state.myId;
         
-        if (state.myId) {
-            myId = state.myId;
-        }
+        document.getElementById('potDisplay').innerHTML = `💰 底池: ${state.pot}`;
         
-        if (roomId) document.getElementById('roomCodeDisplay').innerHTML = `🏠 房间号: ${roomId}`;
-        
+        // 公共牌
         const communityDiv = document.getElementById('communityCards');
         communityDiv.innerHTML = '';
-        if (state.communityCards && state.communityCards.length > 0) {
+        if (state.communityCards) {
             for (let card of state.communityCards) {
                 let div = document.createElement('div'); div.className = 'card';
-                div.setAttribute('data-suit', card.suit);
                 div.innerHTML = `<div class="card-rank">${card.rank}</div><div class="card-suit">${card.suit}</div>`;
                 communityDiv.appendChild(div);
             }
         }
-        document.getElementById('potDisplay').innerHTML = `💰 底池: ${state.pot}`;
         
-        const playersList = document.getElementById('playersList');
-        playersList.innerHTML = '';
+        // 玩家列表
+        const playersDiv = document.getElementById('playersList');
+        playersDiv.innerHTML = '';
         if (state.players) {
             for (let i = 0; i < state.players.length; i++) {
                 const p = state.players[i];
                 const isActive = (state.gameStarted && state.currentPlayerIndex === i && !state.gameEnded);
-                const div = document.createElement('div'); 
+                const div = document.createElement('div');
                 div.className = `player-item ${isActive ? 'active' : ''}`;
                 
-                const isMyOwnCard = (p.id === myId);
+                // 关键：只有自己的手牌才显示真牌
+                const isMe = (p.id === myId);
                 let handHtml = '';
                 if (p.folded) {
                     handHtml = `<div class="card back"></div><div class="card back"></div>`;
-                } else if (isMyOwnCard && p.hand && p.hand.length === 2 && p.hand[0] && p.hand[0].rank) {
+                } else if (isMe && p.hand && p.hand.length === 2) {
                     handHtml = p.hand.map(c => `
-                        <div class="card" data-suit="${c.suit}">
+                        <div class="card">
                             <div class="card-rank">${c.rank}</div>
                             <div class="card-suit">${c.suit}</div>
                         </div>
@@ -225,116 +181,98 @@
                 
                 div.innerHTML = `
                     <div style="display:flex; justify-content:space-between;">
-                        <strong>${p.name} ${p.id === myId ? '(你)' : ''}</strong>
+                        <strong>${p.name} ${isMe ? '(你)' : ''}</strong>
                         <span style="background:#f4b942; padding:2px 10px; border-radius:20px;">💰 ${p.chips}</span>
                     </div>
                     <div class="player-hand">${handHtml}</div>
                     <div>下注: ${p.bet}</div>
                     ${p.folded ? '<div style="color:#ffaaaa;">已弃牌</div>' : ''}
                 `;
-                playersList.appendChild(div);
+                playersDiv.appendChild(div);
             }
-            updateOnlineCount(state.players);
+            document.getElementById('onlineCount').innerHTML = `👥 ${state.players.length}人`;
         }
         
+        // 控制按钮显示
         const actionDiv = document.getElementById('actionButtons');
         const isMyTurn = (state.gameStarted && state.currentPlayerIndex !== undefined && state.players && state.players[state.currentPlayerIndex] && state.players[state.currentPlayerIndex].id === myId && !state.gameEnded);
         actionDiv.style.display = isMyTurn ? 'flex' : 'none';
         
+        const waitingDiv = document.getElementById('waitingArea');
+        const startBtn = document.getElementById('manualStartBtn');
+        const resetBtn = document.getElementById('resetGameBtn');
+        
         if (state.gameEnded) {
-            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束 🏆<br>${isHost ? '你是房主，点击"重置牌局"开始新对局' : '等待房主重置牌局'}`;
+            waitingDiv.style.display = 'none';
+            startBtn.style.display = 'none';
+            if (isHost) resetBtn.style.display = 'inline-block';
+            else resetBtn.style.display = 'none';
+            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束 ${isHost ? '，点击"重置牌局"' : ''}`;
         } else if (!state.gameStarted) {
-            document.getElementById('gameStatus').innerHTML = `⏳ 等待玩家加入 (${state.players ? state.players.length : 0}/6 人)${isHost ? '，你是房主，点击上方"开始游戏"按钮' : '，等待房主开始游戏'}`;
+            waitingDiv.style.display = state.players.length >= 2 ? 'none' : 'block';
+            if (isHost && state.players.length >= 2) {
+                startBtn.style.display = 'inline-block';
+                resetBtn.style.display = 'none';
+            } else {
+                startBtn.style.display = 'none';
+                resetBtn.style.display = 'none';
+            }
+            document.getElementById('gameStatus').innerHTML = `⏳ 等待玩家 (${state.players.length}/6人)${isHost ? '，你是房主' : ''}`;
         } else if (isMyTurn) {
             let need = state.lastBet - (state.players[state.currentPlayerIndex]?.currentBet || 0);
             document.getElementById('callBtn').innerHTML = `🎲 跟注 ${need}`;
-            document.getElementById('gameStatus').innerHTML = `🎲 轮到你了！ 需跟注: ${need} | 底池: ${state.pot}`;
+            document.getElementById('gameStatus').innerHTML = `🎲 轮到你了！ 跟注: ${need} | 底池: ${state.pot}`;
         } else {
-            document.getElementById('gameStatus').innerHTML = `⏳ 等待 ${state.players && state.players[state.currentPlayerIndex] ? state.players[state.currentPlayerIndex].name : '玩家'} 行动...`;
+            document.getElementById('gameStatus').innerHTML = `⏳ 等待 ${state.players?.[state.currentPlayerIndex]?.name} 行动...`;
         }
     }
     
+    // 创建房间
     document.getElementById('createRoomBtn').onclick = () => {
         const playerName = document.getElementById('playerName').value || '玩家';
         const startingChips = parseInt(document.getElementById('startingChips').value) || 2000;
-        
         socket = io({ transports: ['websocket', 'polling'] });
-        
-        socket.on('connect', () => {
-            console.log('WebSocket连接成功');
-            socket.emit('createRoom', { playerName, startingChips });
-        });
-        
+        socket.on('connect', () => socket.emit('createRoom', { playerName, startingChips }));
         socket.on('roomCreated', (data) => {
-            roomId = data.roomId;
-            myId = data.playerId;
-            isHost = true;
+            roomId = data.roomId; myId = data.playerId; isHost = true;
             document.getElementById('roomCodeDisplay').innerHTML = `🏠 房间号: ${roomId}`;
-            roomInfo.innerHTML = `房间创建成功！房间号: <strong style="font-size:24px;">${roomId}</strong><br>分享此号码给朋友！`;
             showGame();
         });
-        
-        socket.on('gameState', renderGame);
-        socket.on('playerJoined', (data) => { updateOnlineCount(data.players); });
-        socket.on('gameMessage', (msg) => { document.getElementById('gameStatus').innerHTML = msg; });
-        socket.on('playerLeft', (data) => { updateOnlineCount(data.players); });
-        socket.on('error', (msg) => { alert(msg); });
+        socket.on('gameState', updateUI);
+        socket.on('playerJoined', (data) => {});
+        socket.on('gameMessage', (msg) => document.getElementById('gameStatus').innerHTML = msg);
+        socket.on('error', (msg) => alert(msg));
     };
     
+    // 加入房间
     document.getElementById('joinRoomBtn').onclick = () => {
         const roomIdInput = document.getElementById('joinRoomId').value;
         const playerName = document.getElementById('playerName').value || '玩家';
-        
-        if (!roomIdInput) { alert('请输入房间号'); return; }
-        
+        if (!roomIdInput) return;
         socket = io({ transports: ['websocket', 'polling'] });
-        
-        socket.on('connect', () => {
-            console.log('WebSocket连接成功，加入房间:', roomIdInput);
-            socket.emit('joinRoom', { roomId: roomIdInput, playerName });
-        });
-        
+        socket.on('connect', () => socket.emit('joinRoom', { roomId: roomIdInput, playerName }));
         socket.on('joinSuccess', (data) => {
-            roomId = data.roomId;
-            myId = data.playerId;
-            isHost = false;
+            roomId = data.roomId; myId = data.playerId; isHost = false;
             document.getElementById('roomCodeDisplay').innerHTML = `🏠 房间号: ${roomId}`;
             showGame();
-            document.getElementById('gameStatus').innerHTML = `✅ 加入成功！起始筹码: ${data.startingChips}`;
         });
-        
-        socket.on('gameState', renderGame);
-        socket.on('playerJoined', (data) => { updateOnlineCount(data.players); });
-        socket.on('gameMessage', (msg) => { document.getElementById('gameStatus').innerHTML = msg; });
-        socket.on('error', (msg) => { alert('错误: ' + msg); });
+        socket.on('gameState', updateUI);
+        socket.on('gameMessage', (msg) => document.getElementById('gameStatus').innerHTML = msg);
+        socket.on('error', (msg) => alert(msg));
     };
     
-    document.getElementById('manualStartBtn').onclick = () => {
-        if (socket && roomId) {
-            socket.emit('startGame', { roomId });
-        }
-    };
+    document.getElementById('manualStartBtn').onclick = () => socket && roomId && socket.emit('startGame', { roomId });
+    document.getElementById('resetGameBtn').onclick = () => socket && roomId && socket.emit('resetGame', { roomId });
     
-    document.getElementById('resetGameBtn').onclick = () => {
-        if (socket && roomId && isHost) {
-            socket.emit('resetGame', { roomId });
-        }
-    };
-    
-    function sendAction(action, amount) {
-        if (socket && roomId) socket.emit('playerAction', { roomId, action, amount });
-    }
-    
+    function sendAction(action, amount) { socket && roomId && socket.emit('playerAction', { roomId, action, amount }); }
     document.getElementById('foldBtn')?.addEventListener('click', () => sendAction('fold'));
     document.getElementById('callBtn')?.addEventListener('click', () => sendAction('call'));
     document.getElementById('raiseBtn20')?.addEventListener('click', () => sendAction('raise', 20));
     document.getElementById('raiseBtn100')?.addEventListener('click', () => sendAction('raise', 100));
     document.getElementById('raiseBtn500')?.addEventListener('click', () => sendAction('raise', 500));
     document.getElementById('allinBtn')?.addEventListener('click', () => {
-        if (currentGameState && currentGameState.players) {
-            let myChips = currentGameState.players.find(p => p.id === myId)?.chips || 0;
-            sendAction('raise', myChips);
-        }
+        let myChips = currentGameState?.players?.find(p => p.id === myId)?.chips || 0;
+        sendAction('raise', myChips);
     });
 </script>
 </body>
