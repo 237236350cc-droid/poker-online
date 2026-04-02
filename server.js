@@ -88,19 +88,21 @@ function createRoom(roomId, hostId) {
         lastBet: 0,
         minRaise: 20,
         deck: [],
-        gameActive: false,
+        gameActive: false,     // 牌局是否进行中
+        gameStarted: false,    // 游戏是否已开始（房主点击开始后变为true）
         waitingForAction: false,
         hostId: hostId
     };
 }
 
 function startNewHand(room) {
+    // 重置所有玩家状态
     for (let p of room.players) {
         p.bet = 0;
         p.currentBet = 0;
         p.folded = false;
         p.hand = [];
-        p.chips = p.startingChips;
+        // 筹码保留，不重置
     }
     room.communityCards = [];
     room.pot = 0;
@@ -108,13 +110,16 @@ function startNewHand(room) {
     room.lastBet = 0;
     room.minRaise = 20;
     room.gameActive = true;
+    room.gameStarted = true;
     room.waitingForAction = false;
     room.deck = createDeck();
     
+    // 发手牌
     for (let i = 0; i < room.players.length; i++) {
         room.players[i].hand = [room.deck.pop(), room.deck.pop()];
     }
     
+    // 设置盲注 (小盲: 玩家1, 大盲: 玩家2)
     let sbIdx = 1 % room.players.length;
     let bbIdx = 2 % room.players.length;
     let smallBlind = 10;
@@ -136,33 +141,121 @@ function startNewHand(room) {
     room.currentPlayerIndex = (bbIdx + 1) % room.players.length;
     room.waitingForAction = true;
     
+    // 广播游戏状态
+    broadcastGameState(room);
+}
+
+function broadcastGameState(room) {
     io.to(room.roomId).emit('gameState', {
-        players: room.players.map(p => ({ name: p.name, chips: p.chips, bet: p.bet, folded: p.folded, hand: p.folded ? [] : p.hand })),
+        players: room.players.map(p => ({ 
+            id: p.id,
+            name: p.name, 
+            chips: p.chips, 
+            bet: p.bet, 
+            currentBet: p.currentBet,
+            folded: p.folded, 
+            hand: p.folded ? [] : p.hand 
+        })),
         communityCards: room.communityCards,
         pot: room.pot,
         currentPlayerIndex: room.currentPlayerIndex,
         currentRound: room.currentRound,
         lastBet: room.lastBet,
         minRaise: room.minRaise,
-        yourTurn: false
+        gameActive: room.gameActive,
+        gameStarted: room.gameStarted,
+        gameEnded: !room.gameActive && room.gameStarted
     });
 }
 
-function nextPlayer(room, io) {
+function nextPlayer(room) {
+    if (!room.gameActive) return;
+    
+    // 检查是否只有一人未弃牌
+    let activePlayers = room.players.filter(p => !p.folded);
+    if (activePlayers.length === 1) {
+        let winner = activePlayers[0];
+        winner.chips += room.pot;
+        io.to(room.roomId).emit('gameMessage', `${winner.name} 赢得底池 ${room.pot} 筹码！`);
+        room.gameActive = false;
+        broadcastGameState(room);
+        return;
+    }
+    
+    // 检查当前轮下注是否完成
+    let allBetEqual = room.players.filter(p => !p.folded).every(p => p.currentBet === room.lastBet);
+    if (allBetEqual) {
+        advanceToNextStage(room);
+        return;
+    }
+    
+    // 切换到下一个未弃牌的玩家
     do {
         room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
     } while (room.players[room.currentPlayerIndex].folded);
     
-    io.to(room.roomId).emit('gameState', {
-        players: room.players.map(p => ({ name: p.name, chips: p.chips, bet: p.bet, folded: p.folded, hand: p.folded ? [] : p.hand })),
-        communityCards: room.communityCards,
-        pot: room.pot,
-        currentPlayerIndex: room.currentPlayerIndex,
-        currentRound: room.currentRound,
-        lastBet: room.lastBet,
-        minRaise: room.minRaise,
-        yourTurn: false
-    });
+    broadcastGameState(room);
+}
+
+function advanceToNextStage(room) {
+    // 重置本轮下注记录
+    for (let p of room.players) {
+        p.currentBet = 0;
+    }
+    room.lastBet = 0;
+    
+    if (room.currentRound === 'preflop') {
+        if (room.deck.length >= 3) {
+            room.communityCards = [room.deck.pop(), room.deck.pop(), room.deck.pop()];
+        }
+        room.currentRound = 'flop';
+        io.to(room.roomId).emit('gameMessage', "🔥 翻牌圈 (Flop)");
+    } else if (room.currentRound === 'flop') {
+        if (room.deck.length >= 1) {
+            room.communityCards.push(room.deck.pop());
+        }
+        room.currentRound = 'turn';
+        io.to(room.roomId).emit('gameMessage', "🔄 转牌圈 (Turn)");
+    } else if (room.currentRound === 'turn') {
+        if (room.deck.length >= 1) {
+            room.communityCards.push(room.deck.pop());
+        }
+        room.currentRound = 'river';
+        io.to(room.roomId).emit('gameMessage', "🌊 河牌圈 (River)");
+    } else if (room.currentRound === 'river') {
+        // 摊牌
+        showdown(room);
+        return;
+    }
+    
+    // 找到第一个未弃牌的玩家开始新下注轮
+    let firstIdx = 0;
+    for (let i = 0; i < room.players.length; i++) {
+        if (!room.players[i].folded) {
+            firstIdx = i;
+            break;
+        }
+    }
+    room.currentPlayerIndex = firstIdx;
+    broadcastGameState(room);
+}
+
+function showdown(room) {
+    let active = room.players.filter(p => !p.folded);
+    if (active.length === 0) {
+        room.gameActive = false;
+        broadcastGameState(room);
+        return;
+    }
+    
+    active.sort((a, b) => compareHands(b.hand, a.hand, room.communityCards));
+    let winner = active[0];
+    winner.chips += room.pot;
+    
+    io.to(room.roomId).emit('gameMessage', `🏆 摊牌！${winner.name} 赢下底池 ${room.pot} 筹码！`);
+    room.pot = 0;
+    room.gameActive = false;
+    broadcastGameState(room);
 }
 
 io.on('connection', (socket) => {
@@ -197,6 +290,11 @@ io.on('connection', (socket) => {
             socket.emit('error', '房间已满');
             return;
         }
+        if (room.gameStarted) {
+            socket.emit('error', '游戏已经开始，无法加入');
+            return;
+        }
+        
         socket.join(roomId);
         room.players.push({
             id: socket.id,
@@ -210,14 +308,13 @@ io.on('connection', (socket) => {
         });
         io.to(roomId).emit('playerJoined', { players: room.players.map(p => ({ id: p.id, name: p.name })) });
         
-        if (room.players.length >= 2 && !room.gameActive) {
-            startNewHand(room);
-        }
+        // 广播游戏状态（等待界面）
+        broadcastGameState(room);
     });
     
     socket.on('startGame', ({ roomId }) => {
         const room = rooms.get(roomId);
-        if (room && room.players.length >= 2 && !room.gameActive) {
+        if (room && room.players.length >= 2 && !room.gameStarted && room.hostId === socket.id) {
             startNewHand(room);
         }
     });
@@ -233,44 +330,37 @@ io.on('connection', (socket) => {
         if (action === 'fold') {
             player.folded = true;
             io.to(roomId).emit('gameMessage', `${player.name} 弃牌`);
-            let activeCount = room.players.filter(p => !p.folded).length;
-            if (activeCount === 1) {
-                let winner = room.players.find(p => !p.folded);
-                winner.chips += room.pot;
-                io.to(roomId).emit('gameMessage', `${winner.name} 赢得底池 ${room.pot} 筹码！`);
-                room.gameActive = false;
-                io.to(roomId).emit('gameState', {
-                    players: room.players.map(p => ({ name: p.name, chips: p.chips, bet: p.bet, folded: p.folded, hand: [] })),
-                    communityCards: room.communityCards,
-                    pot: 0,
-                    currentRound: 'ended',
-                    gameEnded: true
-                });
-                return;
-            }
-            nextPlayer(room, io);
+            nextPlayer(room);
         } else if (action === 'call') {
             let need = room.lastBet - player.currentBet;
             if (need > player.chips) need = player.chips;
+            if (need < 0) need = 0;
             player.chips -= need;
             player.bet += need;
             player.currentBet += need;
             room.pot += need;
             io.to(roomId).emit('gameMessage', `${player.name} 跟注 ${need}`);
-            nextPlayer(room, io);
+            nextPlayer(room);
         } else if (action === 'raise' && amount) {
             let need = room.lastBet - player.currentBet;
             let total = need + amount;
             if (total > player.chips) total = player.chips;
+            if (total <= need) {
+                io.to(roomId).emit('gameMessage', `${player.name} 加注失败，额度不足`);
+                return;
+            }
+            let actualRaise = total - need;
             player.chips -= total;
             player.bet += total;
             player.currentBet += total;
             room.pot += total;
             room.lastBet = player.currentBet;
-            room.minRaise = amount;
-            io.to(roomId).emit('gameMessage', `${player.name} 加注 ${amount}`);
-            nextPlayer(room, io);
+            room.minRaise = actualRaise;
+            io.to(roomId).emit('gameMessage', `${player.name} 加注 ${actualRaise}`);
+            nextPlayer(room);
         }
+        
+        broadcastGameState(room);
     });
     
     socket.on('disconnect', () => {
@@ -278,10 +368,24 @@ io.on('connection', (socket) => {
         for (let [roomId, room] of rooms.entries()) {
             let playerIndex = room.players.findIndex(p => p.id === socket.id);
             if (playerIndex !== -1) {
+                const leftPlayer = room.players[playerIndex];
                 room.players.splice(playerIndex, 1);
                 io.to(roomId).emit('playerLeft', { players: room.players.map(p => ({ id: p.id, name: p.name })) });
+                io.to(roomId).emit('gameMessage', `${leftPlayer.name} 离开了房间`);
+                
                 if (room.players.length === 0) {
                     rooms.delete(roomId);
+                } else if (room.hostId === socket.id && room.players.length > 0) {
+                    // 房主离开，转让给第一个玩家
+                    room.hostId = room.players[0].id;
+                    io.to(roomId).emit('gameMessage', `新房东: ${room.players[0].name}`);
+                }
+                
+                if (room.gameStarted && room.players.length < 2) {
+                    room.gameActive = false;
+                    room.gameStarted = false;
+                    io.to(roomId).emit('gameMessage', '人数不足，游戏结束');
+                    broadcastGameState(room);
                 }
                 break;
             }
