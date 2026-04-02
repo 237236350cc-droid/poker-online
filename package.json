@@ -1,7 +1,6 @@
 {
   "name": "poker-online",
   "version": "1.0.0",
-  "description": "多人德州扑克",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
