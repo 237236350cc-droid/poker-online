@@ -12,10 +12,8 @@ const io = socketIo(server, {
 
 app.use(express.static('public'));
 
-// 游戏房间存储
 const rooms = new Map();
 
-// 牌型相关常量
 const FULL_RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
 const SUITS = ['♠', '♥', '♣', '♦'];
 
@@ -78,7 +76,7 @@ function compareHands(hand1, hand2, community) {
     return 0;
 }
 
-function createRoom(roomId, hostId) {
+function createRoom(roomId, hostId, startingChips) {
     return {
         roomId,
         players: [],
@@ -92,12 +90,15 @@ function createRoom(roomId, hostId) {
         gameActive: false,
         gameStarted: false,
         waitingForAction: false,
-        hostId: hostId
+        hostId: hostId,
+        startingChips: startingChips
     };
 }
 
 function broadcastGameState(room) {
+    console.log(`广播游戏状态到房间 ${room.roomId}，玩家数: ${room.players.length}`);
     for (let player of room.players) {
+        // 为每个玩家单独构建状态，确保只看到自己的手牌
         const playerState = {
             players: room.players.map(p => ({
                 id: p.id,
@@ -106,7 +107,7 @@ function broadcastGameState(room) {
                 bet: p.bet,
                 currentBet: p.currentBet,
                 folded: p.folded,
-                hand: p.id === player.id ? p.hand : []
+                hand: p.id === player.id ? p.hand : []  // 只有自己的手牌可见
             })),
             communityCards: room.communityCards,
             pot: room.pot,
@@ -116,13 +117,17 @@ function broadcastGameState(room) {
             minRaise: room.minRaise,
             gameActive: room.gameActive,
             gameStarted: room.gameStarted,
-            gameEnded: !room.gameActive && room.gameStarted
+            gameEnded: !room.gameActive && room.gameStarted,
+            startingChips: room.startingChips,
+            myId: player.id  // 告诉前端谁是当前玩家
         };
         io.to(player.id).emit('gameState', playerState);
     }
 }
 
 function startNewHand(room) {
+    console.log(`开始新牌局，房间 ${room.roomId}`);
+    
     for (let p of room.players) {
         p.bet = 0;
         p.currentBet = 0;
@@ -141,6 +146,7 @@ function startNewHand(room) {
     
     for (let i = 0; i < room.players.length; i++) {
         room.players[i].hand = [room.deck.pop(), room.deck.pop()];
+        console.log(`${room.players[i].name} 手牌:`, room.players[i].hand);
     }
     
     let sbIdx = 1 % room.players.length;
@@ -252,12 +258,20 @@ function showdown(room) {
     broadcastGameState(room);
 }
 
+// 重置游戏（保留玩家筹码，开始新牌局）
+function resetGame(room) {
+    room.gameStarted = false;
+    room.gameActive = false;
+    broadcastGameState(room);
+    io.to(room.roomId).emit('gameMessage', '✨ 牌局已重置，房主可点击"开始游戏"开始新对局');
+}
+
 io.on('connection', (socket) => {
     console.log('用户连接:', socket.id);
     
     socket.on('createRoom', ({ playerName, startingChips }) => {
         const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const room = createRoom(roomId, socket.id);
+        const room = createRoom(roomId, socket.id, startingChips);
         room.players.push({
             id: socket.id,
             name: playerName,
@@ -270,14 +284,14 @@ io.on('connection', (socket) => {
         });
         rooms.set(roomId, room);
         socket.join(roomId);
-        socket.emit('roomCreated', { roomId, playerId: socket.id });
+        socket.emit('roomCreated', { roomId, playerId: socket.id, startingChips });
         io.to(roomId).emit('playerJoined', { 
-            players: room.players.map(p => ({ id: p.id, name: p.name }))
+            players: room.players.map(p => ({ id: p.id, name: p.name, chips: p.chips }))
         });
-        io.to(roomId).emit('gameMessage', `✨ ${playerName} 创建了房间，房间号: ${roomId}`);
+        io.to(roomId).emit('gameMessage', `✨ ${playerName} 创建了房间，房间号: ${roomId}，每人起始筹码: ${startingChips}`);
     });
     
-    socket.on('joinRoom', ({ roomId, playerName, startingChips }) => {
+    socket.on('joinRoom', ({ roomId, playerName }) => {
         const room = rooms.get(roomId);
         
         if (!room) {
@@ -285,7 +299,7 @@ io.on('connection', (socket) => {
             return;
         }
         if (room.players.length >= 6) {
-            socket.emit('error', '❌ 房间已满');
+            socket.emit('error', '❌ 房间已满 (最多6人)');
             return;
         }
         if (room.gameStarted) {
@@ -294,20 +308,21 @@ io.on('connection', (socket) => {
         }
         
         socket.join(roomId);
+        const chipsAmount = room.startingChips;
         room.players.push({
             id: socket.id,
             name: playerName,
-            chips: startingChips,
-            startingChips: startingChips,
+            chips: chipsAmount,
+            startingChips: chipsAmount,
             bet: 0,
             currentBet: 0,
             hand: [],
             folded: false
         });
         
-        socket.emit('joinSuccess', { roomId, playerId: socket.id });
+        socket.emit('joinSuccess', { roomId, playerId: socket.id, startingChips: chipsAmount });
         io.to(roomId).emit('playerJoined', { 
-            players: room.players.map(p => ({ id: p.id, name: p.name }))
+            players: room.players.map(p => ({ id: p.id, name: p.name, chips: p.chips }))
         });
         io.to(roomId).emit('gameMessage', `🎉 ${playerName} 加入了房间 (${room.players.length}/6人)`);
         broadcastGameState(room);
@@ -332,8 +347,18 @@ io.on('connection', (socket) => {
             return;
         }
         
-        console.log(`房间 ${roomId} 开始游戏`);
         startNewHand(room);
+    });
+    
+    // 新增：重置牌局（房主专用）
+    socket.on('resetGame', ({ roomId }) => {
+        const room = rooms.get(roomId);
+        if (!room) return;
+        if (room.hostId !== socket.id) {
+            socket.emit('error', '只有房主可以重置牌局');
+            return;
+        }
+        resetGame(room);
     });
     
     socket.on('playerAction', ({ roomId, action, amount }) => {
@@ -395,7 +420,7 @@ io.on('connection', (socket) => {
                 room.players.splice(playerIndex, 1);
                 
                 io.to(roomId).emit('playerLeft', { 
-                    players: room.players.map(p => ({ id: p.id, name: p.name }))
+                    players: room.players.map(p => ({ id: p.id, name: p.name, chips: p.chips }))
                 });
                 io.to(roomId).emit('gameMessage', `👋 ${leftPlayer.name} 离开了房间`);
                 
