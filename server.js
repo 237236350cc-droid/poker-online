@@ -40,7 +40,8 @@ function checkStraight(values) {
     return false;
 }
 
-function getHandRank(cards) {
+// 获取牌型名称和等级
+function getHandRankNameAndLevel(cards) {
     let vals = cards.map(c=>rankValue(c.rank));
     vals.sort((a,b)=>a-b);
     let isFlush = cards.every(c=>c.suit === cards[0].suit);
@@ -48,20 +49,33 @@ function getHandRank(cards) {
     let counts = new Map();
     for(let v of vals) counts.set(v, (counts.get(v)||0)+1);
     let countArr = Array.from(counts.values()).sort((a,b)=>b-a);
+    let rankCounts = Array.from(counts.entries()).sort((a,b)=>b[1]-a[1]);
+    
     let hasFour = countArr[0] === 4;
     let hasThree = countArr[0] === 3;
     let hasPair = countArr[0] === 2;
     let twoPair = hasPair && countArr[1] === 2;
     let fullHouse = hasThree && countArr[1] === 2;
-    if(isFlush && isStraight) return 8;
-    if(hasFour) return 7;
-    if(fullHouse) return 6;
-    if(isFlush) return 5;
-    if(isStraight) return 4;
-    if(hasThree) return 3;
-    if(twoPair) return 2;
-    if(hasPair) return 1;
-    return 0;
+    
+    let highRank = rankCounts[0][0];
+    let highRankName = FULL_RANKS[highRank];
+    
+    if(isFlush && isStraight) {
+        if(vals.includes(12) && vals.includes(0)) return { level: 9, name: "🃏 皇家同花顺" };
+        return { level: 8, name: "🌈 同花顺" };
+    }
+    if(hasFour) return { level: 7, name: `⭐ 四条 (${highRankName})` };
+    if(fullHouse) return { level: 6, name: `🏠 葫芦 (${highRankName} full of ${FULL_RANKS[rankCounts[1][0]]})` };
+    if(isFlush) return { level: 5, name: "🌸 同花" };
+    if(isStraight) return { level: 4, name: "📏 顺子" };
+    if(hasThree) return { level: 3, name: `🎯 三条 (${highRankName})` };
+    if(twoPair) return { level: 2, name: `🪙 两对 (${FULL_RANKS[rankCounts[0][0]]} and ${FULL_RANKS[rankCounts[1][0]]})` };
+    if(hasPair) return { level: 1, name: `🃟 一对 (${highRankName})` };
+    return { level: 0, name: `🔹 高牌 (${highRankName})` };
+}
+
+function getHandRank(cards) {
+    return getHandRankNameAndLevel(cards).level;
 }
 
 function compareHands(hand1, hand2, community) {
@@ -96,7 +110,6 @@ function createRoom(roomId, hostId, startingChips) {
 }
 
 function broadcastGameState(room) {
-    console.log(`[广播] 房间 ${room.roomId}, 玩家数: ${room.players.length}`);
     for (let targetPlayer of room.players) {
         const playerState = {
             myId: targetPlayer.id,
@@ -153,8 +166,6 @@ function startNewHand(room) {
         if (card1 && card2) {
             room.players[i].hand = [card1, card2];
             console.log(`${room.players[i].name} 手牌: ${card1.rank}${card1.suit} ${card2.rank}${card2.suit}`);
-        } else {
-            console.error(`发牌失败: 牌堆不足`);
         }
     }
     
@@ -180,7 +191,7 @@ function startNewHand(room) {
     room.currentPlayerIndex = (bbIdx + 1) % room.players.length;
     room.waitingForAction = true;
     
-    io.to(room.roomId).emit('gameMessage', `🎲 游戏开始！`);
+    io.to(room.roomId).emit('gameMessage', `🎲 游戏开始！小盲:${room.players[sbIdx].name}(10) 大盲:${room.players[bbIdx].name}(20)`);
     broadcastGameState(room);
 }
 
@@ -228,19 +239,19 @@ function advanceToNextStage(room) {
             room.communityCards = [room.deck.pop(), room.deck.pop(), room.deck.pop()];
         }
         room.currentRound = 'flop';
-        io.to(room.roomId).emit('gameMessage', "🔥 翻牌圈");
+        io.to(room.roomId).emit('gameMessage', "🔥 翻牌圈 (Flop)");
     } else if (room.currentRound === 'flop') {
         if (room.deck.length >= 1) {
             room.communityCards.push(room.deck.pop());
         }
         room.currentRound = 'turn';
-        io.to(room.roomId).emit('gameMessage', "🔄 转牌圈");
+        io.to(room.roomId).emit('gameMessage', "🔄 转牌圈 (Turn)");
     } else if (room.currentRound === 'turn') {
         if (room.deck.length >= 1) {
             room.communityCards.push(room.deck.pop());
         }
         room.currentRound = 'river';
-        io.to(room.roomId).emit('gameMessage', "🌊 河牌圈");
+        io.to(room.roomId).emit('gameMessage', "🌊 河牌圈 (River)");
     } else if (room.currentRound === 'river') {
         showdown(room);
         return;
@@ -267,11 +278,33 @@ function showdown(room) {
         return;
     }
     
-    active.sort((a, b) => compareHands(b.hand, a.hand, room.communityCards));
-    let winner = active[0];
-    winner.chips += room.pot;
+    // 计算每个玩家的牌型
+    let playersWithRank = active.map(p => {
+        let allCards = [...p.hand, ...room.communityCards];
+        let rankInfo = getHandRankNameAndLevel(allCards);
+        return {
+            player: p,
+            rankLevel: rankInfo.level,
+            rankName: rankInfo.name,
+            hand: p.hand
+        };
+    });
     
-    io.to(room.roomId).emit('gameMessage', `🏆 ${winner.name} 赢下底池 ${room.pot} 筹码！`);
+    // 排序找出赢家
+    playersWithRank.sort((a, b) => b.rankLevel - a.rankLevel);
+    let winner = playersWithRank[0];
+    
+    // 显示摊牌信息
+    let showdownMsg = "🃟 摊牌结果：\n";
+    for (let pr of playersWithRank) {
+        let handStr = pr.hand.map(c => `${c.rank}${c.suit}`).join(' ');
+        showdownMsg += `${pr.player.name}: ${handStr} → ${pr.rankName}\n`;
+    }
+    io.to(room.roomId).emit('gameMessage', showdownMsg);
+    
+    winner.player.chips += room.pot;
+    io.to(room.roomId).emit('gameMessage', `🏆 ${winner.player.name} 以 ${winner.rankName} 赢下底池 ${room.pot} 筹码！`);
+    
     room.pot = 0;
     room.gameActive = false;
     broadcastGameState(room);
