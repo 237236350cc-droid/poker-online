@@ -98,7 +98,6 @@ function createRoom(roomId, hostId, startingChips) {
 function broadcastGameState(room) {
     console.log(`广播游戏状态到房间 ${room.roomId}，玩家数: ${room.players.length}`);
     for (let player of room.players) {
-        // 为每个玩家单独构建状态，确保只看到自己的手牌
         const playerState = {
             players: room.players.map(p => ({
                 id: p.id,
@@ -107,7 +106,7 @@ function broadcastGameState(room) {
                 bet: p.bet,
                 currentBet: p.currentBet,
                 folded: p.folded,
-                hand: p.id === player.id ? p.hand : []  // 只有自己的手牌可见
+                hand: p.id === player.id ? p.hand : []  // 关键：只有自己看到手牌
             })),
             communityCards: room.communityCards,
             pot: room.pot,
@@ -258,7 +257,6 @@ function showdown(room) {
     broadcastGameState(room);
 }
 
-// 重置游戏（保留玩家筹码，开始新牌局）
 function resetGame(room) {
     room.gameStarted = false;
     room.gameActive = false;
@@ -350,7 +348,6 @@ io.on('connection', (socket) => {
         startNewHand(room);
     });
     
-    // 新增：重置牌局（房主专用）
     socket.on('resetGame', ({ roomId }) => {
         const room = rooms.get(roomId);
         if (!room) return;
