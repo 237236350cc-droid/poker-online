@@ -1,6 +1,0 @@
-poker-online/
-├── server.js          # 后端服务器
-├── package.json       # 依赖配置
-├── public/
-│   └── index.html     # 前端游戏页面
-└── README.md          # 部署说明
