@@ -124,6 +124,9 @@ function broadcastGameState(room) {
 }
 
 function startNewHand(room) {
+    console.log(`[新牌局] 房间 ${room.roomId}, 玩家数: ${room.players.length}`);
+    
+    // 重置所有玩家状态
     for (let p of room.players) {
         p.bet = 0;
         p.currentBet = 0;
@@ -140,21 +143,28 @@ function startNewHand(room) {
     room.waitingForAction = false;
     room.deck = createDeck();
     
+    // 关键修复：每人发2张手牌
     for (let i = 0; i < room.players.length; i++) {
-        room.players[i].hand = [room.deck.pop(), room.deck.pop()];
+        const card1 = room.deck.pop();
+        const card2 = room.deck.pop();
+        room.players[i].hand = [card1, card2];
+        console.log(`${room.players[i].name} 手牌: ${card1.rank}${card1.suit} ${card2.rank}${card2.suit}`);
     }
     
+    // 设置盲注位置（小盲=索引1，大盲=索引2，按人数取模）
     let sbIdx = 1 % room.players.length;
     let bbIdx = 2 % room.players.length;
     let smallBlind = 10;
     let bigBlind = 20;
     
+    // 收取小盲注
     if (room.players[sbIdx].chips >= smallBlind) {
         room.players[sbIdx].chips -= smallBlind;
         room.players[sbIdx].bet = smallBlind;
         room.players[sbIdx].currentBet = smallBlind;
         room.pot += smallBlind;
     }
+    // 收取大盲注
     if (room.players[bbIdx].chips >= bigBlind) {
         room.players[bbIdx].chips -= bigBlind;
         room.players[bbIdx].bet = bigBlind;
@@ -162,10 +172,12 @@ function startNewHand(room) {
         room.pot += bigBlind;
     }
     room.lastBet = bigBlind;
+    
+    // 当前玩家从大盲的下一位开始
     room.currentPlayerIndex = (bbIdx + 1) % room.players.length;
     room.waitingForAction = true;
     
-    io.to(room.roomId).emit('gameMessage', '🎲 游戏开始！每人起始筹码: ' + room.startingChips);
+    io.to(room.roomId).emit('gameMessage', `🎲 游戏开始！小盲:${room.players[sbIdx].name}(10) 大盲:${room.players[bbIdx].name}(20)`);
     broadcastGameState(room);
 }
 
@@ -182,12 +194,15 @@ function nextPlayer(room) {
         return;
     }
     
+    // 检查是否所有未弃牌玩家下注额相等
     let allBetEqual = room.players.filter(p => !p.folded).every(p => p.currentBet === room.lastBet);
     if (allBetEqual) {
         advanceToNextStage(room);
         return;
     }
     
+    // 切换到下一个未弃牌的玩家
+    let startIdx = room.currentPlayerIndex;
     do {
         room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
     } while (room.players[room.currentPlayerIndex].folded);
@@ -196,42 +211,51 @@ function nextPlayer(room) {
 }
 
 function advanceToNextStage(room) {
+    // 重置本轮下注记录
     for (let p of room.players) {
         p.currentBet = 0;
     }
     room.lastBet = 0;
     
     if (room.currentRound === 'preflop') {
+        // 发翻牌：3张
         if (room.deck.length >= 3) {
             room.communityCards = [room.deck.pop(), room.deck.pop(), room.deck.pop()];
         }
         room.currentRound = 'flop';
-        io.to(room.roomId).emit('gameMessage', "🔥 翻牌圈 (Flop)");
+        io.to(room.roomId).emit('gameMessage', "🔥 翻牌圈 (Flop) - 已发3张公共牌");
     } else if (room.currentRound === 'flop') {
+        // 发转牌：1张
         if (room.deck.length >= 1) {
             room.communityCards.push(room.deck.pop());
         }
         room.currentRound = 'turn';
-        io.to(room.roomId).emit('gameMessage', "🔄 转牌圈 (Turn)");
+        io.to(room.roomId).emit('gameMessage', "🔄 转牌圈 (Turn) - 已发第4张公共牌");
     } else if (room.currentRound === 'turn') {
+        // 发河牌：1张
         if (room.deck.length >= 1) {
             room.communityCards.push(room.deck.pop());
         }
         room.currentRound = 'river';
-        io.to(room.roomId).emit('gameMessage', "🌊 河牌圈 (River)");
+        io.to(room.roomId).emit('gameMessage', "🌊 河牌圈 (River) - 已发第5张公共牌");
     } else if (room.currentRound === 'river') {
         showdown(room);
         return;
     }
     
-    let firstIdx = 0;
+    // 新下注轮：从小盲注位置开始（索引1）
+    let sbIdx = 1 % room.players.length;
+    // 找到第一个未弃牌的玩家（从小盲开始）
+    let firstIdx = sbIdx;
     for (let i = 0; i < room.players.length; i++) {
-        if (!room.players[i].folded) {
-            firstIdx = i;
+        let idx = (sbIdx + i) % room.players.length;
+        if (!room.players[idx].folded) {
+            firstIdx = idx;
             break;
         }
     }
     room.currentPlayerIndex = firstIdx;
+    io.to(room.roomId).emit('gameMessage', `📢 新下注轮开始，从小盲位${room.players[sbIdx].name}开始行动`);
     broadcastGameState(room);
 }
 
@@ -242,6 +266,13 @@ function showdown(room) {
         broadcastGameState(room);
         return;
     }
+    
+    // 显示所有玩家的手牌用于摊牌
+    let showdownMsg = "🃟 摊牌：";
+    for (let p of active) {
+        showdownMsg += `${p.name} [${p.hand[0].rank}${p.hand[0].suit} ${p.hand[1].rank}${p.hand[1].suit}] `;
+    }
+    io.to(room.roomId).emit('gameMessage', showdownMsg);
     
     active.sort((a, b) => compareHands(b.hand, a.hand, room.communityCards));
     let winner = active[0];
@@ -385,7 +416,7 @@ io.on('connection', (socket) => {
             let total = need + amount;
             if (total > player.chips) total = player.chips;
             if (total <= need) {
-                io.to(roomId).emit('gameMessage', `${player.name} 加注失败`);
+                io.to(roomId).emit('gameMessage', `${player.name} 加注失败，额度不足`);
                 return;
             }
             let actualRaise = total - need;
