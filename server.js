@@ -110,6 +110,7 @@ function createRoom(roomId, hostId, startingChips) {
 }
 
 function broadcastGameState(room) {
+    console.log(`[广播] 房间 ${room.roomId}, 玩家数: ${room.players.length}`);
     for (let targetPlayer of room.players) {
         const playerState = {
             myId: targetPlayer.id,
