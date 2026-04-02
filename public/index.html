@@ -326,4 +326,25 @@
     document.getElementById('resetGameBtn').onclick = () => {
         if (socket && roomId && isHost) {
             console.log('重置牌局');
-            socket.emit('
+            socket.emit('resetGame', { roomId });
+        }
+    };
+    
+    function sendAction(action, amount) {
+        if (socket && roomId) socket.emit('playerAction', { roomId, action, amount });
+    }
+    
+    document.getElementById('foldBtn')?.addEventListener('click', () => sendAction('fold'));
+    document.getElementById('callBtn')?.addEventListener('click', () => sendAction('call'));
+    document.getElementById('raiseBtn20')?.addEventListener('click', () => sendAction('raise', 20));
+    document.getElementById('raiseBtn100')?.addEventListener('click', () => sendAction('raise', 100));
+    document.getElementById('raiseBtn500')?.addEventListener('click', () => sendAction('raise', 500));
+    document.getElementById('allinBtn')?.addEventListener('click', () => {
+        if (currentGameState && currentGameState.players) {
+            let myChips = currentGameState.players.find(p => p.id === myId)?.chips || 0;
+            sendAction('raise', myChips);
+        }
+    });
+</script>
+</body>
+</html>
