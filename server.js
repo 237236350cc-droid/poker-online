@@ -139,6 +139,7 @@ function broadcastGameState(room) {
 function startNewHand(room) {
     console.log(`[新牌局] 房间 ${room.roomId}, 玩家数: ${room.players.length}`);
     
+    // 重置牌局状态（不重置筹码）
     for (let p of room.players) {
         p.bet = 0;
         p.currentBet = 0;
@@ -154,17 +155,22 @@ function startNewHand(room) {
     room.gameStarted = true;
     room.waitingForAction = false;
     
+    // 重新洗牌
     room.deck = createDeck();
     
+    // 每人发2张手牌
     for (let i = 0; i < room.players.length; i++) {
         const card1 = room.deck.pop();
         const card2 = room.deck.pop();
         if (card1 && card2) {
             room.players[i].hand = [card1, card2];
             console.log(`${room.players[i].name} 手牌: ${card1.rank}${card1.suit} ${card2.rank}${card2.suit}`);
+        } else {
+            console.error(`发牌失败: 牌堆不足`);
         }
     }
     
+    // 设置盲注
     let sbIdx = 1 % room.players.length;
     let bbIdx = 2 % room.players.length;
     let smallBlind = 10;
@@ -392,7 +398,6 @@ io.on('connection', (socket) => {
             nextPlayer(room);
         } 
         else if (action === 'check') {
-            // 过牌：只有当 lastBet === 0 时才能过牌
             if (room.lastBet === 0) {
                 io.to(roomId).emit('gameMessage', `${player.name} 过牌`);
                 nextPlayer(room);
