@@ -40,7 +40,6 @@ function checkStraight(values) {
     return false;
 }
 
-// 获取牌型名称和等级
 function getHandRankNameAndLevel(cards) {
     let vals = cards.map(c=>rankValue(c.rank));
     vals.sort((a,b)=>a-b);
@@ -110,7 +109,6 @@ function createRoom(roomId, hostId, startingChips) {
 }
 
 function broadcastGameState(room) {
-    console.log(`[广播] 房间 ${room.roomId}, 玩家数: ${room.players.length}`);
     for (let targetPlayer of room.players) {
         const playerState = {
             myId: targetPlayer.id,
@@ -141,7 +139,6 @@ function broadcastGameState(room) {
 function startNewHand(room) {
     console.log(`[新牌局] 房间 ${room.roomId}, 玩家数: ${room.players.length}`);
     
-    // 重置牌局状态（不重置筹码）
     for (let p of room.players) {
         p.bet = 0;
         p.currentBet = 0;
@@ -157,10 +154,8 @@ function startNewHand(room) {
     room.gameStarted = true;
     room.waitingForAction = false;
     
-    // 重新洗牌
     room.deck = createDeck();
     
-    // 每人发2张手牌
     for (let i = 0; i < room.players.length; i++) {
         const card1 = room.deck.pop();
         const card2 = room.deck.pop();
@@ -170,7 +165,6 @@ function startNewHand(room) {
         }
     }
     
-    // 设置盲注
     let sbIdx = 1 % room.players.length;
     let bbIdx = 2 % room.players.length;
     let smallBlind = 10;
@@ -279,7 +273,6 @@ function showdown(room) {
         return;
     }
     
-    // 计算每个玩家的牌型
     let playersWithRank = active.map(p => {
         let allCards = [...p.hand, ...room.communityCards];
         let rankInfo = getHandRankNameAndLevel(allCards);
@@ -291,11 +284,9 @@ function showdown(room) {
         };
     });
     
-    // 排序找出赢家
     playersWithRank.sort((a, b) => b.rankLevel - a.rankLevel);
     let winner = playersWithRank[0];
     
-    // 显示摊牌信息
     let showdownMsg = "🃟 摊牌结果：\n";
     for (let pr of playersWithRank) {
         let handStr = pr.hand.map(c => `${c.rank}${c.suit}`).join(' ');
@@ -400,6 +391,15 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('gameMessage', `${player.name} 弃牌`);
             nextPlayer(room);
         } 
+        else if (action === 'check') {
+            // 过牌：只有当 lastBet === 0 时才能过牌
+            if (room.lastBet === 0) {
+                io.to(roomId).emit('gameMessage', `${player.name} 过牌`);
+                nextPlayer(room);
+            } else {
+                io.to(roomId).emit('gameMessage', `${player.name} 无法过牌，前面有下注`);
+            }
+        }
         else if (action === 'call') {
             let need = room.lastBet - player.currentBet;
             if (need > player.chips) need = player.chips;
