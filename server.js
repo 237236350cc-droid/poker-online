@@ -96,9 +96,9 @@ function createRoom(roomId, hostId, startingChips) {
 }
 
 function broadcastGameState(room) {
-    console.log(`广播游戏状态到房间 ${room.roomId}，玩家数: ${room.players.length}`);
-    for (let player of room.players) {
+    for (let targetPlayer of room.players) {
         const playerState = {
+            myId: targetPlayer.id,
             players: room.players.map(p => ({
                 id: p.id,
                 name: p.name,
@@ -106,7 +106,7 @@ function broadcastGameState(room) {
                 bet: p.bet,
                 currentBet: p.currentBet,
                 folded: p.folded,
-                hand: p.id === player.id ? p.hand : []  // 关键：只有自己看到手牌
+                hand: p.id === targetPlayer.id ? p.hand : []
             })),
             communityCards: room.communityCards,
             pot: room.pot,
@@ -117,16 +117,13 @@ function broadcastGameState(room) {
             gameActive: room.gameActive,
             gameStarted: room.gameStarted,
             gameEnded: !room.gameActive && room.gameStarted,
-            startingChips: room.startingChips,
-            myId: player.id  // 告诉前端谁是当前玩家
+            startingChips: room.startingChips
         };
-        io.to(player.id).emit('gameState', playerState);
+        io.to(targetPlayer.id).emit('gameState', playerState);
     }
 }
 
 function startNewHand(room) {
-    console.log(`开始新牌局，房间 ${room.roomId}`);
-    
     for (let p of room.players) {
         p.bet = 0;
         p.currentBet = 0;
@@ -145,7 +142,6 @@ function startNewHand(room) {
     
     for (let i = 0; i < room.players.length; i++) {
         room.players[i].hand = [room.deck.pop(), room.deck.pop()];
-        console.log(`${room.players[i].name} 手牌:`, room.players[i].hand);
     }
     
     let sbIdx = 1 % room.players.length;
@@ -169,7 +165,7 @@ function startNewHand(room) {
     room.currentPlayerIndex = (bbIdx + 1) % room.players.length;
     room.waitingForAction = true;
     
-    io.to(room.roomId).emit('gameMessage', '🎲 游戏开始！');
+    io.to(room.roomId).emit('gameMessage', '🎲 游戏开始！每人起始筹码: ' + room.startingChips);
     broadcastGameState(room);
 }
 
@@ -344,7 +340,6 @@ io.on('connection', (socket) => {
             socket.emit('error', '只有房主可以开始游戏');
             return;
         }
-        
         startNewHand(room);
     });
     
@@ -403,31 +398,26 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('gameMessage', `${player.name} 加注 ${actualRaise}`);
             nextPlayer(room);
         }
-        
         broadcastGameState(room);
     });
     
     socket.on('disconnect', () => {
         console.log('用户断开:', socket.id);
-        
         for (let [roomId, room] of rooms.entries()) {
             const playerIndex = room.players.findIndex(p => p.id === socket.id);
             if (playerIndex !== -1) {
                 const leftPlayer = room.players[playerIndex];
                 room.players.splice(playerIndex, 1);
-                
                 io.to(roomId).emit('playerLeft', { 
                     players: room.players.map(p => ({ id: p.id, name: p.name, chips: p.chips }))
                 });
                 io.to(roomId).emit('gameMessage', `👋 ${leftPlayer.name} 离开了房间`);
-                
                 if (room.players.length === 0) {
                     rooms.delete(roomId);
                 } else if (room.hostId === socket.id) {
                     room.hostId = room.players[0].id;
                     io.to(roomId).emit('gameMessage', `👑 ${room.players[0].name} 成为新房主`);
                 }
-                
                 if (room.gameStarted && room.players.length < 2) {
                     room.gameActive = false;
                     room.gameStarted = false;
