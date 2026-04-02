@@ -58,6 +58,31 @@
         .actions { display: flex; gap: 10px; justify-content: center; margin-top: 15px; flex-wrap: wrap; }
         .actions button { padding: 8px 16px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; }
         .status { background: #000000aa; border-radius: 40px; padding: 12px; text-align: center; color: #ffefb5; margin-top: 20px; }
+        .room-header {
+            background: #00000099;
+            border-radius: 30px;
+            padding: 10px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .room-code { font-size: 20px; font-weight: bold; color: #ffd966; }
+        .online-count { background: #2ecc71; padding: 5px 15px; border-radius: 30px; color: white; font-weight: bold; }
+        .start-btn {
+            background: #e67e22;
+            padding: 8px 25px;
+            font-size: 16px;
+        }
+        .waiting-list {
+            background: #00000066;
+            border-radius: 30px;
+            padding: 15px;
+            margin-top: 15px;
+            text-align: center;
+        }
         @media (max-width: 700px) {
             .card { width: 55px; height: 78px; }
             .card-rank { font-size: 26px; }
@@ -79,11 +104,20 @@
     </div>
     
     <div id="gameArea" class="game-area">
+        <div class="room-header">
+            <span class="room-code" id="roomCodeDisplay">房间号: ---</span>
+            <span class="online-count" id="onlineCount">👥 在线: 0人</span>
+            <button id="manualStartBtn" class="start-btn" style="display:none;">▶ 开始游戏</button>
+        </div>
         <div class="table">
             <div class="community" id="communityCards"></div>
             <div class="pot" id="potDisplay">💰 底池: 0</div>
         </div>
         <div class="players-list" id="playersList"></div>
+        <div id="waitingArea" class="waiting-list" style="display:none;">
+            ⏳ 等待更多玩家加入... (至少2人，当前 <span id="currentPlayerCount">0</span>/6)<br>
+            <small>分享房间号给朋友，他们加入后游戏会自动开始</small>
+        </div>
         <div class="status" id="gameStatus">等待游戏开始...</div>
         <div class="actions" id="actionButtons" style="display:none;">
             <button id="foldBtn">🙅 弃牌</button>
@@ -101,12 +135,37 @@
     let roomId = null;
     let myId = null;
     let currentGameState = null;
+    let isHost = false;
     
     const lobby = document.getElementById('lobby');
     const gameArea = document.getElementById('gameArea');
     const roomInfo = document.getElementById('roomInfo');
     
     function showGame() { lobby.style.display = 'none'; gameArea.style.display = 'block'; }
+    
+    function updateOnlineCount(players) {
+        const count = players.length;
+        document.getElementById('onlineCount').innerHTML = `👥 在线: ${count}人`;
+        document.getElementById('currentPlayerCount').innerText = count;
+        
+        // 显示/隐藏等待区域和开始按钮
+        const waitingArea = document.getElementById('waitingArea');
+        const startBtn = document.getElementById('manualStartBtn');
+        
+        if (currentGameState && currentGameState.gameStarted) {
+            waitingArea.style.display = 'none';
+            startBtn.style.display = 'none';
+        } else {
+            if (count >= 2) {
+                waitingArea.style.display = 'none';
+                if (isHost) startBtn.style.display = 'inline-block';
+                else startBtn.style.display = 'none';
+            } else {
+                waitingArea.style.display = 'block';
+                startBtn.style.display = 'none';
+            }
+        }
+    }
     
     function renderGame(state) {
         currentGameState = state;
@@ -125,19 +184,19 @@
         playersList.innerHTML = '';
         for (let i = 0; i < state.players.length; i++) {
             const p = state.players[i];
-            const isActive = (state.currentPlayerIndex === i && !state.gameEnded);
+            const isActive = (state.currentPlayerIndex === i && !state.gameEnded && state.gameStarted);
             const div = document.createElement('div'); div.className = `player-item ${isActive ? 'active' : ''}`;
             let handHtml = '';
             if (p.folded) {
                 handHtml = `<div class="card back"></div><div class="card back"></div>`;
-            } else if (p.hand && p.hand.length === 2 && p.hand[0].rank) {
+            } else if (p.hand && p.hand.length === 2 && p.hand[0] && p.hand[0].rank) {
                 handHtml = p.hand.map(c => `<div class="card"><div class="card-rank">${c.rank}</div><div class="card-suit">${c.suit}</div></div>`).join('');
             } else {
                 handHtml = `<div class="card back"></div><div class="card back"></div>`;
             }
             div.innerHTML = `
                 <div style="display:flex; justify-content:space-between;">
-                    <strong>${p.name}</strong>
+                    <strong>${p.name} ${p.id === myId ? '(你)' : ''}</strong>
                     <span style="background:#f4b942; padding:2px 10px; border-radius:20px;">💰 ${p.chips}</span>
                 </div>
                 <div class="player-hand">${handHtml}</div>
@@ -147,15 +206,21 @@
             playersList.appendChild(div);
         }
         
+        // 更新在线人数显示
+        if (state.players) updateOnlineCount(state.players);
+        
         const actionDiv = document.getElementById('actionButtons');
-        const isMyTurn = (state.currentPlayerIndex !== undefined && state.players[state.currentPlayerIndex] && state.players[state.currentPlayerIndex].id === myId && !state.gameEnded);
+        const isMyTurn = (state.gameStarted && state.currentPlayerIndex !== undefined && state.players[state.currentPlayerIndex] && state.players[state.currentPlayerIndex].id === myId && !state.gameEnded);
         actionDiv.style.display = isMyTurn ? 'flex' : 'none';
-        if (isMyTurn) {
+        
+        if (state.gameEnded) {
+            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束 🏆<br>点击"开始游戏"继续新对局`;
+        } else if (!state.gameStarted) {
+            document.getElementById('gameStatus').innerHTML = `⏳ 等待玩家加入 (${state.players.length}/6 人)${isHost ? '，你是房主，点击上方"开始游戏"按钮' : '，等待房主开始游戏'}`;
+        } else if (isMyTurn) {
             let need = state.lastBet - (state.players[state.currentPlayerIndex]?.currentBet || 0);
             document.getElementById('callBtn').innerHTML = `🎲 跟注 ${need}`;
             document.getElementById('gameStatus').innerHTML = `🎲 轮到你了！ 需跟注: ${need} | 底池: ${state.pot}`;
-        } else if (state.gameEnded) {
-            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束，点击上方按钮开始新游戏 🏆`;
         } else {
             document.getElementById('gameStatus').innerHTML = `⏳ 等待 ${state.players[state.currentPlayerIndex]?.name} 行动...`;
         }
@@ -171,18 +236,21 @@
         socket.on('roomCreated', (data) => {
             roomId = data.roomId;
             myId = data.playerId;
-            roomInfo.innerHTML = `房间号: <strong style="font-size:24px;">${roomId}</strong><br>分享此号码给朋友！`;
+            isHost = true;
+            document.getElementById('roomCodeDisplay').innerHTML = `🏠 房间号: ${roomId}`;
+            roomInfo.innerHTML = `房间创建成功！房间号: <strong style="font-size:24px;">${roomId}</strong><br>分享此号码给朋友！`;
             showGame();
         });
         socket.on('gameState', renderGame);
         socket.on('playerJoined', (data) => {
+            updateOnlineCount(data.players);
             roomInfo.innerHTML = `房间号: ${roomId}<br>已加入: ${data.players.map(p=>p.name).join(', ')}`;
         });
         socket.on('gameMessage', (msg) => {
             document.getElementById('gameStatus').innerHTML = msg;
         });
         socket.on('playerLeft', (data) => {
-            roomInfo.innerHTML = `房间号: ${roomId}<br>在线: ${data.players.map(p=>p.name).join(', ')}`;
+            updateOnlineCount(data.players);
         });
     };
     
@@ -198,13 +266,22 @@
         socket.on('roomCreated', (data) => {
             roomId = data.roomId;
             myId = data.playerId;
+            isHost = false;
+            document.getElementById('roomCodeDisplay').innerHTML = `🏠 房间号: ${roomId}`;
             showGame();
         });
         socket.on('gameState', renderGame);
         socket.on('playerJoined', (data) => {
-            document.getElementById('gameStatus').innerHTML = `玩家加入: ${data.players.map(p=>p.name).join(', ')}`;
+            updateOnlineCount(data.players);
         });
         socket.on('error', (msg) => { alert(msg); });
+    };
+    
+    // 手动开始游戏按钮
+    document.getElementById('manualStartBtn').onclick = () => {
+        if (socket && roomId) {
+            socket.emit('startGame', { roomId });
+        }
     };
     
     function sendAction(action, amount) {
