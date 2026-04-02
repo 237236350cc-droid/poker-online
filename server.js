@@ -126,12 +126,13 @@ function broadcastGameState(room) {
 function startNewHand(room) {
     console.log(`[新牌局] 房间 ${room.roomId}, 玩家数: ${room.players.length}`);
     
-    // 重置所有玩家状态
+    // 重要：不重置筹码，只重置牌局状态
     for (let p of room.players) {
         p.bet = 0;
         p.currentBet = 0;
         p.folded = false;
         p.hand = [];
+        // p.chips 保持不变！筹码不重置
     }
     room.communityCards = [];
     room.pot = 0;
@@ -141,14 +142,21 @@ function startNewHand(room) {
     room.gameActive = true;
     room.gameStarted = true;
     room.waitingForAction = false;
+    
+    // 重新洗牌并发牌
     room.deck = createDeck();
     
-    // 关键修复：每人发2张手牌
+    // 每人发2张手牌
     for (let i = 0; i < room.players.length; i++) {
         const card1 = room.deck.pop();
         const card2 = room.deck.pop();
-        room.players[i].hand = [card1, card2];
-        console.log(`${room.players[i].name} 手牌: ${card1.rank}${card1.suit} ${card2.rank}${card2.suit}`);
+        if (card1 && card2) {
+            room.players[i].hand = [card1, card2];
+            console.log(`${room.players[i].name} 手牌: ${card1.rank}${card1.suit} ${card2.rank}${card2.suit}`);
+        } else {
+            console.error(`发牌失败: 牌堆不足`);
+            room.players[i].hand = [];
+        }
     }
     
     // 设置盲注位置（小盲=索引1，大盲=索引2，按人数取模）
@@ -157,19 +165,31 @@ function startNewHand(room) {
     let smallBlind = 10;
     let bigBlind = 20;
     
-    // 收取小盲注
+    // 收取小盲注（检查筹码是否足够）
     if (room.players[sbIdx].chips >= smallBlind) {
         room.players[sbIdx].chips -= smallBlind;
         room.players[sbIdx].bet = smallBlind;
         room.players[sbIdx].currentBet = smallBlind;
         room.pot += smallBlind;
+    } else {
+        // 筹码不足，全下
+        room.players[sbIdx].bet = room.players[sbIdx].chips;
+        room.players[sbIdx].currentBet = room.players[sbIdx].chips;
+        room.pot += room.players[sbIdx].chips;
+        room.players[sbIdx].chips = 0;
     }
+    
     // 收取大盲注
     if (room.players[bbIdx].chips >= bigBlind) {
         room.players[bbIdx].chips -= bigBlind;
         room.players[bbIdx].bet = bigBlind;
         room.players[bbIdx].currentBet = bigBlind;
         room.pot += bigBlind;
+    } else {
+        room.players[bbIdx].bet = room.players[bbIdx].chips;
+        room.players[bbIdx].currentBet = room.players[bbIdx].chips;
+        room.pot += room.players[bbIdx].chips;
+        room.players[bbIdx].chips = 0;
     }
     room.lastBet = bigBlind;
     
@@ -195,18 +215,26 @@ function nextPlayer(room) {
     }
     
     // 检查是否所有未弃牌玩家下注额相等
-    let allBetEqual = room.players.filter(p => !p.folded).every(p => p.currentBet === room.lastBet);
+    let allBetEqual = activePlayers.every(p => p.currentBet === room.lastBet);
     if (allBetEqual) {
         advanceToNextStage(room);
         return;
     }
     
-    // 切换到下一个未弃牌的玩家
-    let startIdx = room.currentPlayerIndex;
+    // 保存当前索引，切换到下一个未弃牌的玩家
+    let originalIndex = room.currentPlayerIndex;
+    let newIndex = room.currentPlayerIndex;
     do {
-        room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
-    } while (room.players[room.currentPlayerIndex].folded);
+        newIndex = (newIndex + 1) % room.players.length;
+        // 如果循环一圈又回到原点，说明没有其他活跃玩家了
+        if (newIndex === originalIndex) {
+            // 所有活跃玩家都已行动完毕，进入下一阶段
+            advanceToNextStage(room);
+            return;
+        }
+    } while (room.players[newIndex].folded);
     
+    room.currentPlayerIndex = newIndex;
     broadcastGameState(room);
 }
 
@@ -255,7 +283,7 @@ function advanceToNextStage(room) {
         }
     }
     room.currentPlayerIndex = firstIdx;
-    io.to(room.roomId).emit('gameMessage', `📢 新下注轮开始，从小盲位${room.players[sbIdx].name}开始行动`);
+    io.to(room.roomId).emit('gameMessage', `📢 新下注轮开始，从小盲位开始行动`);
     broadcastGameState(room);
 }
 
@@ -270,7 +298,9 @@ function showdown(room) {
     // 显示所有玩家的手牌用于摊牌
     let showdownMsg = "🃟 摊牌：";
     for (let p of active) {
-        showdownMsg += `${p.name} [${p.hand[0].rank}${p.hand[0].suit} ${p.hand[1].rank}${p.hand[1].suit}] `;
+        if (p.hand && p.hand.length === 2) {
+            showdownMsg += `${p.name} [${p.hand[0].rank}${p.hand[0].suit} ${p.hand[1].rank}${p.hand[1].suit}] `;
+        }
     }
     io.to(room.roomId).emit('gameMessage', showdownMsg);
     
@@ -399,6 +429,7 @@ io.on('connection', (socket) => {
             player.folded = true;
             io.to(roomId).emit('gameMessage', `${player.name} 弃牌`);
             nextPlayer(room);
+            broadcastGameState(room);
         } 
         else if (action === 'call') {
             let need = room.lastBet - player.currentBet;
@@ -410,6 +441,7 @@ io.on('connection', (socket) => {
             room.pot += need;
             io.to(roomId).emit('gameMessage', `${player.name} 跟注 ${need}`);
             nextPlayer(room);
+            broadcastGameState(room);
         } 
         else if (action === 'raise' && amount) {
             let need = room.lastBet - player.currentBet;
@@ -428,8 +460,8 @@ io.on('connection', (socket) => {
             room.minRaise = actualRaise;
             io.to(roomId).emit('gameMessage', `${player.name} 加注 ${actualRaise}`);
             nextPlayer(room);
+            broadcastGameState(room);
         }
-        broadcastGameState(room);
     });
     
     socket.on('disconnect', () => {
