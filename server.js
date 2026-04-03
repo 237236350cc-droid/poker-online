@@ -5,25 +5,16 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: { origin: "*" },
-    transports: ['websocket', 'polling']
-});
-
+const io = socketIo(server, { cors: { origin: "*" }, transports: ['websocket', 'polling'] });
 app.use(express.static('public'));
 
 const rooms = new Map();
-
 const FULL_RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
 const SUITS = ['♠', '♥', '♣', '♦'];
 
 function createDeck() {
     let deck = [];
-    for (let suit of SUITS) {
-        for (let rank of FULL_RANKS) {
-            deck.push({ rank, suit });
-        }
-    }
+    for (let suit of SUITS) for (let rank of FULL_RANKS) deck.push({ rank, suit });
     for (let i = deck.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [deck[i], deck[j]] = [deck[j], deck[i]];
@@ -49,115 +40,157 @@ function getHandRankNameAndLevel(cards) {
     for(let v of vals) counts.set(v, (counts.get(v)||0)+1);
     let countArr = Array.from(counts.values()).sort((a,b)=>b-a);
     let rankCounts = Array.from(counts.entries()).sort((a,b)=>b[1]-a[1]);
-    
-    let hasFour = countArr[0] === 4;
-    let hasThree = countArr[0] === 3;
-    let hasPair = countArr[0] === 2;
-    let twoPair = hasPair && countArr[1] === 2;
-    let fullHouse = hasThree && countArr[1] === 2;
-    
     let highRank = rankCounts[0][0];
     let highRankName = FULL_RANKS[highRank];
     
-    if(isFlush && isStraight) {
-        if(vals.includes(12) && vals.includes(0)) return { level: 9, name: "🃏 皇家同花顺" };
-        return { level: 8, name: "🌈 同花顺" };
-    }
-    if(hasFour) return { level: 7, name: `⭐ 四条 (${highRankName})` };
-    if(fullHouse) return { level: 6, name: `🏠 葫芦 (${highRankName} full of ${FULL_RANKS[rankCounts[1][0]]})` };
-    if(isFlush) return { level: 5, name: "🌸 同花" };
-    if(isStraight) return { level: 4, name: "📏 顺子" };
-    if(hasThree) return { level: 3, name: `🎯 三条 (${highRankName})` };
-    if(twoPair) return { level: 2, name: `🪙 两对 (${FULL_RANKS[rankCounts[0][0]]} and ${FULL_RANKS[rankCounts[1][0]]})` };
-    if(hasPair) return { level: 1, name: `🃟 一对 (${highRankName})` };
-    return { level: 0, name: `🔹 高牌 (${highRankName})` };
-}
-
-function getHandRank(cards) {
-    return getHandRankNameAndLevel(cards).level;
-}
-
-function compareHands(hand1, hand2, community) {
-    let cards1 = [...hand1, ...community];
-    let cards2 = [...hand2, ...community];
-    let rank1 = getHandRank(cards1);
-    let rank2 = getHandRank(cards2);
-    if(rank1 !== rank2) return rank1 > rank2 ? 1 : -1;
-    let val1 = cards1.map(c=>rankValue(c.rank)).sort((a,b)=>b-a);
-    let val2 = cards2.map(c=>rankValue(c.rank)).sort((a,b)=>b-a);
-    for(let i=0;i<val1.length;i++) if(val1[i] !== val2[i]) return val1[i] > val2[i] ? 1 : -1;
-    return 0;
+    if(isFlush && isStraight) return { level: 8, name: "同花顺" };
+    if(countArr[0] === 4) return { level: 7, name: `四条 ${highRankName}` };
+    if(countArr[0] === 3 && countArr[1] === 2) return { level: 6, name: `葫芦 ${highRankName}` };
+    if(isFlush) return { level: 5, name: "同花" };
+    if(isStraight) return { level: 4, name: "顺子" };
+    if(countArr[0] === 3) return { level: 3, name: `三条 ${highRankName}` };
+    if(countArr[0] === 2 && countArr[1] === 2) return { level: 2, name: `两对` };
+    if(countArr[0] === 2) return { level: 1, name: `一对 ${highRankName}` };
+    return { level: 0, name: `高牌 ${highRankName}` };
 }
 
 function createRoom(roomId, hostId, startingChips) {
     return {
-        roomId,
+        roomId, hostId, startingChips,
         players: [],
         communityCards: [],
         pot: 0,
         currentRound: 'preflop',
-        currentPlayerIndex: 0,
+        currentPlayerIdx: 0,
         lastBet: 0,
-        minRaise: 20,
         deck: [],
         gameActive: false,
-        gameStarted: false,
-        hostId: hostId,
-        startingChips: startingChips
+        gameStarted: false
     };
 }
 
-function broadcastGameState(room) {
-    for (let targetPlayer of room.players) {
-        const playerState = {
-            myId: targetPlayer.id,
+function broadcastState(room) {
+    for (let target of room.players) {
+        io.to(target.id).emit('gameState', {
+            myId: target.id,
             players: room.players.map(p => ({
-                id: p.id,
-                name: p.name,
-                chips: p.chips,
-                bet: p.bet,
-                currentBet: p.currentBet,
-                folded: p.folded,
-                hand: p.id === targetPlayer.id ? p.hand : []
+                id: p.id, name: p.name, chips: p.chips, bet: p.bet,
+                currentBet: p.currentBet, folded: p.folded,
+                hand: p.id === target.id ? p.hand : []
             })),
             communityCards: room.communityCards,
             pot: room.pot,
-            currentPlayerIndex: room.currentPlayerIndex,
+            currentPlayerIdx: room.currentPlayerIdx,
             currentRound: room.currentRound,
             lastBet: room.lastBet,
-            minRaise: room.minRaise,
             gameActive: room.gameActive,
-            gameStarted: room.gameStarted,
-            gameEnded: !room.gameActive && room.gameStarted,
-            startingChips: room.startingChips
-        };
-        io.to(targetPlayer.id).emit('gameState', playerState);
+            gameStarted: room.gameStarted
+        });
+    }
+}
+
+function getNextActivePlayer(room, startIdx) {
+    for (let i = 1; i <= room.players.length; i++) {
+        let idx = (startIdx + i) % room.players.length;
+        if (!room.players[idx].folded) return idx;
+    }
+    return -1;
+}
+
+function isRoundComplete(room) {
+    let active = room.players.filter(p => !p.folded);
+    if (active.length <= 1) return true;
+    return active.every(p => p.currentBet === room.lastBet);
+}
+
+function endHandWithWinner(room, winner) {
+    winner.chips += room.pot;
+    io.to(room.roomId).emit('gameMessage', `🏆 ${winner.name} 赢得底池 ${room.pot} 筹码！`);
+    room.pot = 0;
+    room.gameActive = false;
+    broadcastState(room);
+}
+
+function showdown(room) {
+    let active = room.players.filter(p => !p.folded);
+    if (active.length === 0) { room.gameActive = false; broadcastState(room); return; }
+    
+    let ranked = active.map(p => ({
+        player: p,
+        ...getHandRankNameAndLevel([...p.hand, ...room.communityCards])
+    })).sort((a,b) => b.level - a.level);
+    
+    let msg = "🃟 摊牌：\n";
+    for (let r of ranked) msg += `${r.player.name}: ${r.name}\n`;
+    io.to(room.roomId).emit('gameMessage', msg);
+    
+    let winner = ranked[0].player;
+    winner.chips += room.pot;
+    io.to(room.roomId).emit('gameMessage', `🏆 ${winner.name} 以 ${ranked[0].name} 赢下 ${room.pot} 筹码！`);
+    room.pot = 0;
+    room.gameActive = false;
+    broadcastState(room);
+}
+
+function advanceToNextStage(room) {
+    for (let p of room.players) p.currentBet = 0;
+    room.lastBet = 0;
+    
+    if (room.currentRound === 'preflop') {
+        room.communityCards = [room.deck.pop(), room.deck.pop(), room.deck.pop()];
+        room.currentRound = 'flop';
+        io.to(room.roomId).emit('gameMessage', "🔥 翻牌圈");
+        room.currentPlayerIdx = getNextActivePlayer(room, 0);
+    } else if (room.currentRound === 'flop') {
+        room.communityCards.push(room.deck.pop());
+        room.currentRound = 'turn';
+        io.to(room.roomId).emit('gameMessage', "🔄 转牌圈");
+        room.currentPlayerIdx = getNextActivePlayer(room, 0);
+    } else if (room.currentRound === 'turn') {
+        room.communityCards.push(room.deck.pop());
+        room.currentRound = 'river';
+        io.to(room.roomId).emit('gameMessage', "🌊 河牌圈");
+        room.currentPlayerIdx = getNextActivePlayer(room, 0);
+    } else if (room.currentRound === 'river') {
+        showdown(room);
+        return;
+    }
+    broadcastState(room);
+}
+
+function processNextPlayer(room) {
+    let activeCount = room.players.filter(p => !p.folded).length;
+    if (activeCount === 1) {
+        let winner = room.players.find(p => !p.folded);
+        endHandWithWinner(room, winner);
+        return;
+    }
+    
+    if (isRoundComplete(room)) {
+        advanceToNextStage(room);
+        return;
+    }
+    
+    let nextIdx = getNextActivePlayer(room, room.currentPlayerIdx);
+    if (nextIdx !== -1) {
+        room.currentPlayerIdx = nextIdx;
+        broadcastState(room);
     }
 }
 
 function startNewHand(room) {
-    console.log(`[新牌局] 房间 ${room.roomId}`);
-    
     for (let p of room.players) {
-        p.bet = 0;
-        p.currentBet = 0;
-        p.folded = false;
-        p.hand = [];
+        p.bet = 0; p.currentBet = 0; p.folded = false; p.hand = [];
     }
     room.communityCards = [];
     room.pot = 0;
     room.currentRound = 'preflop';
     room.lastBet = 0;
-    room.minRaise = 20;
     room.gameActive = true;
     room.gameStarted = true;
-    
     room.deck = createDeck();
     
-    for (let i = 0; i < room.players.length; i++) {
-        room.players[i].hand = [room.deck.pop(), room.deck.pop()];
-        console.log(`${room.players[i].name} 手牌: ${room.players[i].hand[0].rank}${room.players[i].hand[0].suit} ${room.players[i].hand[1].rank}${room.players[i].hand[1].suit}`);
-    }
+    for (let p of room.players) p.hand = [room.deck.pop(), room.deck.pop()];
     
     let sbIdx = 1 % room.players.length;
     let bbIdx = 2 % room.players.length;
@@ -175,229 +208,72 @@ function startNewHand(room) {
         room.pot += 20;
     }
     room.lastBet = 20;
-    room.currentPlayerIndex = (bbIdx + 1) % room.players.length;
+    room.currentPlayerIdx = getNextActivePlayer(room, bbIdx);
     
     io.to(room.roomId).emit('gameMessage', `🎲 游戏开始！小盲:${room.players[sbIdx].name}(10) 大盲:${room.players[bbIdx].name}(20)`);
-    broadcastGameState(room);
-}
-
-// 核心：切换到下一个玩家
-function switchToNextPlayer(room) {
-    if (!room.gameActive) return;
-    
-    let activePlayers = room.players.filter(p => !p.folded);
-    if (activePlayers.length === 1) {
-        let winner = activePlayers[0];
-        winner.chips += room.pot;
-        io.to(room.roomId).emit('gameMessage', `🏆 ${winner.name} 赢得底池 ${room.pot} 筹码！`);
-        room.gameActive = false;
-        broadcastGameState(room);
-        return;
-    }
-    
-    // 检查是否所有人都已行动（下注额相等）
-    let allActed = activePlayers.every(p => p.currentBet === room.lastBet);
-    if (allActed) {
-        // 进入下一阶段
-        advanceToNextStage(room);
-        return;
-    }
-    
-    // 找到下一个未弃牌的玩家
-    let nextIdx = (room.currentPlayerIndex + 1) % room.players.length;
-    let found = false;
-    for (let i = 0; i < room.players.length; i++) {
-        let idx = (room.currentPlayerIndex + 1 + i) % room.players.length;
-        if (!room.players[idx].folded) {
-            nextIdx = idx;
-            found = true;
-            break;
-        }
-    }
-    
-    if (found) {
-        room.currentPlayerIndex = nextIdx;
-        console.log(`[切换玩家] 新玩家: ${room.players[nextIdx].name}`);
-        broadcastGameState(room);
-    } else {
-        // 没有找到，理论上不应该
-        console.log(`[错误] 找不到下一个玩家`);
-    }
-}
-
-function advanceToNextStage(room) {
-    console.log(`[阶段推进] ${room.currentRound}`);
-    
-    // 重置下注记录
-    for (let p of room.players) {
-        p.currentBet = 0;
-    }
-    room.lastBet = 0;
-    
-    if (room.currentRound === 'preflop') {
-        if (room.deck.length >= 3) {
-            room.communityCards = [room.deck.pop(), room.deck.pop(), room.deck.pop()];
-        }
-        room.currentRound = 'flop';
-        io.to(room.roomId).emit('gameMessage', "🔥 翻牌圈 (Flop)");
-    } else if (room.currentRound === 'flop') {
-        if (room.deck.length >= 1) {
-            room.communityCards.push(room.deck.pop());
-        }
-        room.currentRound = 'turn';
-        io.to(room.roomId).emit('gameMessage', "🔄 转牌圈 (Turn)");
-    } else if (room.currentRound === 'turn') {
-        if (room.deck.length >= 1) {
-            room.communityCards.push(room.deck.pop());
-        }
-        room.currentRound = 'river';
-        io.to(room.roomId).emit('gameMessage', "🌊 河牌圈 (River)");
-    } else if (room.currentRound === 'river') {
-        showdown(room);
-        return;
-    }
-    
-    // 新下注轮：从小盲位开始
-    let sbIdx = 1 % room.players.length;
-    room.currentPlayerIndex = sbIdx;
-    // 如果小盲位弃牌了，找下一个
-    while (room.players[room.currentPlayerIndex].folded) {
-        room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
-    }
-    broadcastGameState(room);
-}
-
-function showdown(room) {
-    let active = room.players.filter(p => !p.folded);
-    if (active.length === 0) {
-        room.gameActive = false;
-        broadcastGameState(room);
-        return;
-    }
-    
-    let playersWithRank = active.map(p => {
-        let allCards = [...p.hand, ...room.communityCards];
-        let rankInfo = getHandRankNameAndLevel(allCards);
-        return {
-            player: p,
-            rankLevel: rankInfo.level,
-            rankName: rankInfo.name,
-            hand: p.hand
-        };
-    });
-    
-    playersWithRank.sort((a, b) => b.rankLevel - a.rankLevel);
-    let winner = playersWithRank[0];
-    
-    let showdownMsg = "🃟 摊牌结果：\n";
-    for (let pr of playersWithRank) {
-        let handStr = pr.hand.map(c => `${c.rank}${c.suit}`).join(' ');
-        showdownMsg += `${pr.player.name}: ${handStr} → ${pr.rankName}\n`;
-    }
-    io.to(room.roomId).emit('gameMessage', showdownMsg);
-    
-    winner.player.chips += room.pot;
-    io.to(room.roomId).emit('gameMessage', `🏆 ${winner.player.name} 以 ${winner.rankName} 赢下底池 ${room.pot} 筹码！`);
-    
-    room.pot = 0;
-    room.gameActive = false;
-    broadcastGameState(room);
+    broadcastState(room);
 }
 
 function resetGame(room) {
     room.gameStarted = false;
     room.gameActive = false;
-    broadcastGameState(room);
+    broadcastState(room);
     io.to(room.roomId).emit('gameMessage', '✨ 牌局已重置，点击"开始游戏"');
 }
 
 io.on('connection', (socket) => {
-    console.log('用户连接:', socket.id);
-    
     socket.on('createRoom', ({ playerName, startingChips }) => {
-        const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const room = createRoom(roomId, socket.id, startingChips);
-        room.players.push({
-            id: socket.id,
-            name: playerName,
-            chips: startingChips,
-            startingChips: startingChips,
-            bet: 0,
-            currentBet: 0,
-            hand: [],
-            folded: false
-        });
+        let roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        let room = createRoom(roomId, socket.id, startingChips);
+        room.players.push({ id: socket.id, name: playerName, chips: startingChips, startingChips, bet: 0, currentBet: 0, hand: [], folded: false });
         rooms.set(roomId, room);
         socket.join(roomId);
         socket.emit('roomCreated', { roomId, playerId: socket.id, startingChips });
-        io.to(roomId).emit('playerJoined', { 
-            players: room.players.map(p => ({ id: p.id, name: p.name, chips: p.chips }))
-        });
-        io.to(roomId).emit('gameMessage', `✨ ${playerName} 创建了房间，房间号: ${roomId}`);
+        io.to(roomId).emit('playerJoined', { players: room.players.map(p => ({ id: p.id, name: p.name })) });
+        io.to(roomId).emit('gameMessage', `✨ ${playerName} 创建房间，房间号: ${roomId}`);
     });
     
     socket.on('joinRoom', ({ roomId, playerName }) => {
-        const room = rooms.get(roomId);
-        if (!room) { socket.emit('error', '❌ 房间不存在'); return; }
-        if (room.players.length >= 6) { socket.emit('error', '❌ 房间已满'); return; }
-        if (room.gameStarted) { socket.emit('error', '❌ 游戏已开始'); return; }
+        let room = rooms.get(roomId);
+        if (!room) return socket.emit('error', '房间不存在');
+        if (room.players.length >= 6) return socket.emit('error', '房间已满');
+        if (room.gameStarted) return socket.emit('error', '游戏已开始');
         
         socket.join(roomId);
-        const chipsAmount = room.startingChips;
-        room.players.push({
-            id: socket.id,
-            name: playerName,
-            chips: chipsAmount,
-            startingChips: chipsAmount,
-            bet: 0,
-            currentBet: 0,
-            hand: [],
-            folded: false
-        });
-        
-        socket.emit('joinSuccess', { roomId, playerId: socket.id, startingChips: chipsAmount });
-        io.to(roomId).emit('playerJoined', { 
-            players: room.players.map(p => ({ id: p.id, name: p.name, chips: p.chips }))
-        });
-        io.to(roomId).emit('gameMessage', `🎉 ${playerName} 加入了房间 (${room.players.length}/6人)`);
-        broadcastGameState(room);
+        room.players.push({ id: socket.id, name: playerName, chips: room.startingChips, startingChips: room.startingChips, bet: 0, currentBet: 0, hand: [], folded: false });
+        socket.emit('joinSuccess', { roomId, playerId: socket.id, startingChips: room.startingChips });
+        io.to(roomId).emit('playerJoined', { players: room.players.map(p => ({ id: p.id, name: p.name })) });
+        io.to(roomId).emit('gameMessage', `🎉 ${playerName} 加入房间 (${room.players.length}/6人)`);
+        broadcastState(room);
     });
     
     socket.on('startGame', ({ roomId }) => {
-        const room = rooms.get(roomId);
-        if (!room) return;
-        if (room.players.length < 2) { socket.emit('error', '至少需要2人'); return; }
-        if (room.gameStarted) return;
-        if (room.hostId !== socket.id) { socket.emit('error', '只有房主可以开始'); return; }
-        startNewHand(room);
+        let room = rooms.get(roomId);
+        if (room && !room.gameStarted && room.players.length >= 2 && room.hostId === socket.id) startNewHand(room);
     });
     
     socket.on('resetGame', ({ roomId }) => {
-        const room = rooms.get(roomId);
+        let room = rooms.get(roomId);
         if (room && room.hostId === socket.id) resetGame(room);
     });
     
     socket.on('playerAction', ({ roomId, action, amount }) => {
-        const room = rooms.get(roomId);
+        let room = rooms.get(roomId);
         if (!room || !room.gameActive) return;
-        
-        const playerIndex = room.players.findIndex(p => p.id === socket.id);
-        if (playerIndex === -1) return;
-        if (room.currentPlayerIndex !== playerIndex) return;
-        if (room.players[playerIndex].folded) return;
-        
-        const player = room.players[playerIndex];
+        let pIdx = room.players.findIndex(p => p.id === socket.id);
+        if (pIdx !== room.currentPlayerIdx || room.players[pIdx].folded) return;
+        let player = room.players[pIdx];
         
         if (action === 'fold') {
             player.folded = true;
             io.to(roomId).emit('gameMessage', `${player.name} 弃牌`);
-            switchToNextPlayer(room);
-        } 
-        else if (action === 'check') {
-            io.to(roomId).emit('gameMessage', `${player.name} 过牌`);
-            switchToNextPlayer(room);
-        }
-        else if (action === 'call') {
+            processNextPlayer(room);
+        } else if (action === 'check') {
+            if (player.currentBet === room.lastBet) {
+                io.to(roomId).emit('gameMessage', `${player.name} 过牌`);
+                processNextPlayer(room);
+            }
+        } else if (action === 'call') {
             let need = room.lastBet - player.currentBet;
             if (need > player.chips) need = player.chips;
             player.chips -= need;
@@ -405,33 +281,28 @@ io.on('connection', (socket) => {
             player.currentBet += need;
             room.pot += need;
             io.to(roomId).emit('gameMessage', `${player.name} 跟注 ${need}`);
-            switchToNextPlayer(room);
-        } 
-        else if (action === 'raise' && amount) {
+            processNextPlayer(room);
+        } else if (action === 'raise' && amount) {
             let need = room.lastBet - player.currentBet;
             let total = need + amount;
             if (total > player.chips) total = player.chips;
-            if (total <= need) {
-                io.to(roomId).emit('gameMessage', `${player.name} 加注失败`);
-                return;
-            }
-            let actualRaise = total - need;
+            if (total <= need) return;
+            let actual = total - need;
             player.chips -= total;
             player.bet += total;
             player.currentBet += total;
             room.pot += total;
             room.lastBet = player.currentBet;
-            room.minRaise = actualRaise;
-            io.to(roomId).emit('gameMessage', `${player.name} 加注 ${actualRaise}`);
-            switchToNextPlayer(room);
+            io.to(roomId).emit('gameMessage', `${player.name} 加注 ${actual}`);
+            processNextPlayer(room);
         }
     });
     
     socket.on('disconnect', () => {
         for (let [roomId, room] of rooms.entries()) {
-            const idx = room.players.findIndex(p => p.id === socket.id);
+            let idx = room.players.findIndex(p => p.id === socket.id);
             if (idx !== -1) {
-                const left = room.players[idx];
+                let left = room.players[idx];
                 room.players.splice(idx, 1);
                 io.to(roomId).emit('playerLeft', { players: room.players.map(p => ({ id: p.id, name: p.name })) });
                 io.to(roomId).emit('gameMessage', `👋 ${left.name} 离开`);
