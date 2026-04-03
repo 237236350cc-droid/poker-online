@@ -37,22 +37,74 @@
             margin-bottom: 20px;
         }
         .community { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; min-height: 120px; }
+        
+        /* 修复：卡片样式 - 确保内容可见 */
         .card {
-            width: 70px; height: 96px; background: white; border-radius: 12px;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            box-shadow: -2px 2px 6px rgba(0,0,0,0.2);
+            width: 70px;
+            height: 96px;
+            background: #ffffff;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: -2px 2px 6px rgba(0,0,0,0.3);
+            position: relative;
+            font-weight: bold;
         }
-        .card[data-suit="♥"], .card[data-suit="♦"] { color: #c33; }
-        .card-rank { font-size: 34px; font-weight: bold; }
-        .card-suit { font-size: 30px; }
+        .card-rank {
+            font-size: 34px;
+            font-weight: 800;
+            line-height: 1;
+        }
+        .card-suit {
+            font-size: 32px;
+            line-height: 1;
+        }
+        /* 花色颜色 - 明确指定 */
+        .card[data-suit="♥"] .card-rank,
+        .card[data-suit="♥"] .card-suit,
+        .card[data-suit="♦"] .card-rank,
+        .card[data-suit="♦"] .card-suit {
+            color: #e74c3c !important;
+        }
+        .card[data-suit="♣"] .card-rank,
+        .card[data-suit="♣"] .card-suit,
+        .card[data-suit="♠"] .card-rank,
+        .card[data-suit="♠"] .card-suit {
+            color: #2c3e50 !important;
+        }
+        
+        /* 牌背样式 */
         .card.back {
             background: repeating-linear-gradient(45deg, #2c5a7a, #2c5a7a 12px, #1d4468 12px, #1d4468 24px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .card.back::after { content: "?"; font-size: 32px; color: #ffdd99; display: flex; align-items: center; justify-content: center; height: 100%; }
+        .card.back::after {
+            content: "?";
+            font-size: 32px;
+            font-weight: bold;
+            color: #ffdd99;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+        .card.back .card-rank,
+        .card.back .card-suit {
+            display: none;
+        }
+        
         .pot { text-align: center; margin: 15px; color: gold; font-weight: bold; font-size: 22px; }
         .players-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 20px; }
         .player-item {
-            background: #1e1e2fe6; border-radius: 28px; padding: 12px; color: white;
+            background: #1e1e2fe6;
+            border-radius: 28px;
+            padding: 12px;
+            color: white;
             border: 1px solid rgba(255,215,0,0.3);
         }
         .player-item.active { background: #2c5432e6; border: 2px solid #ffdf7e; }
@@ -77,10 +129,12 @@
         .start-btn { background: #e67e22; }
         .reset-btn { background: #3498db; }
         .waiting-list { background: #00000066; border-radius: 30px; padding: 15px; margin-top: 15px; text-align: center; }
+        
         @media (max-width: 700px) {
             .card { width: 55px; height: 78px; }
             .player-hand .card { width: 45px; height: 65px; }
             .card-rank { font-size: 24px; }
+            .card-suit { font-size: 22px; }
         }
     </style>
 </head>
@@ -137,11 +191,29 @@
         document.getElementById('gameArea').style.display = 'block';
     }
     
+    // 创建卡片DOM元素的辅助函数
+    function createCardElement(card) {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.setAttribute('data-suit', card.suit);
+        
+        const rankSpan = document.createElement('div');
+        rankSpan.className = 'card-rank';
+        rankSpan.textContent = card.rank;
+        
+        const suitSpan = document.createElement('div');
+        suitSpan.className = 'card-suit';
+        suitSpan.textContent = card.suit;
+        
+        div.appendChild(rankSpan);
+        div.appendChild(suitSpan);
+        return div;
+    }
+    
     function updateUI(state) {
         console.log('收到游戏状态, myId:', state.myId);
         currentGameState = state;
         
-        // 关键：更新自己的ID
         if (state.myId) {
             myId = state.myId;
         }
@@ -153,9 +225,7 @@
         communityDiv.innerHTML = '';
         if (state.communityCards && state.communityCards.length > 0) {
             for (let card of state.communityCards) {
-                let div = document.createElement('div'); div.className = 'card';
-                div.innerHTML = `<div class="card-rank">${card.rank}</div><div class="card-suit">${card.suit}</div>`;
-                communityDiv.appendChild(div);
+                communityDiv.appendChild(createCardElement(card));
             }
         }
         
@@ -169,21 +239,26 @@
                 const div = document.createElement('div');
                 div.className = `player-item ${isActive ? 'active' : ''}`;
                 
-                // 关键修复：只有自己的手牌才显示真牌
                 const isMe = (p.id === myId);
-                let handHtml = '';
+                let handContainer = document.createElement('div');
+                handContainer.className = 'player-hand';
+                
                 if (p.folded) {
-                    handHtml = `<div class="card back"></div><div class="card back"></div>`;
+                    // 弃牌：显示牌背
+                    const back1 = document.createElement('div'); back1.className = 'card back';
+                    const back2 = document.createElement('div'); back2.className = 'card back';
+                    handContainer.appendChild(back1);
+                    handContainer.appendChild(back2);
                 } else if (isMe && p.hand && p.hand.length === 2) {
-                    // 显示自己的真牌
-                    handHtml = p.hand.map(c => `
-                        <div class="card">
-                            <div class="card-rank">${c.rank}</div>
-                            <div class="card-suit">${c.suit}</div>
-                        </div>
-                    `).join('');
+                    // 自己的手牌：显示真牌
+                    handContainer.appendChild(createCardElement(p.hand[0]));
+                    handContainer.appendChild(createCardElement(p.hand[1]));
                 } else {
-                    handHtml = `<div class="card back"></div><div class="card back"></div>`;
+                    // 其他人的手牌：显示牌背
+                    const back1 = document.createElement('div'); back1.className = 'card back';
+                    const back2 = document.createElement('div'); back2.className = 'card back';
+                    handContainer.appendChild(back1);
+                    handContainer.appendChild(back2);
                 }
                 
                 div.innerHTML = `
@@ -191,10 +266,11 @@
                         <strong>${p.name} ${isMe ? '(你)' : ''}</strong>
                         <span style="background:#f4b942; padding:2px 10px; border-radius:20px;">💰 ${p.chips}</span>
                     </div>
-                    <div class="player-hand">${handHtml}</div>
                     <div>下注: ${p.bet}</div>
                     ${p.folded ? '<div style="color:#ffaaaa;">已弃牌</div>' : ''}
                 `;
+                // 插入手牌容器
+                div.insertBefore(handContainer, div.children[2]);
                 playersDiv.appendChild(div);
             }
             document.getElementById('onlineCount').innerHTML = `👥 ${state.players.length}人`;
@@ -229,6 +305,7 @@
             startBtn.style.display = 'none';
             if (isHost) resetBtn.style.display = 'inline-block';
             else resetBtn.style.display = 'none';
+            document.getElementById('gameStatus').innerHTML = `🏆 牌局结束 🏆<br>${isHost ? '点击"重置牌局"继续' : '等待房主重置牌局'}`;
         } else if (!state.gameStarted) {
             waitingDiv.style.display = state.players.length >= 2 ? 'none' : 'block';
             if (isHost && state.players.length >= 2) {
